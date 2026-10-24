@@ -37,6 +37,7 @@ class SystemTest {
       { name: 'Shorts Repurposing Studio', test: () => this.testShortsRepurposingStudio() },
       { name: 'Research and Provenance Desk', test: () => this.testProvenanceDesk() },
       { name: 'DarkzSEO Discoverability Preflight', test: () => this.testDiscoverabilityPreflight() },
+      { name: 'Remotion Animated Renderer Planning', test: () => this.testRemotionPlanning() },
       { name: 'Open Issue Regressions', test: () => this.testOpenIssueRegressions() },
       { name: 'Resumable Generation Checkpoints', test: () => this.testResumableGenerationCheckpoints() },
       { name: 'API Validation and Security', test: () => this.testAPIValidationAndSecurity() },
@@ -3815,6 +3816,47 @@ class SystemTest {
     const noService = new DailyAutomation({}, {}, {});
     await noService.refreshGrowthExperiments();
   }
+  async testRemotionPlanning() {
+    const { buildRenderProps, estimateWordTimings } = require('./utils/remotion-renderer');
+    const script = {
+      title: 'Smart Homes',
+      hook: { text: 'one two three four' },
+      mainContent: { sections: [
+        { title: 'A', content: 'alpha beta gamma delta epsilon' },
+        { title: 'B', items: [{ number: 1, title: 'first' }, { number: 2, title: 'second' }] }
+      ] },
+      conclusion: { finalThought: 'bye now' }
+    };
+    const props = buildRenderProps({ script, imageNames: ['i0.png', 'i1.png'], audioName: 'n.mp3', totalSeconds: 30 });
+    if (props.scenes.length !== 4) throw new Error(`Expected 4 scenes, got ${props.scenes.length}`);
+    const overlap = 0.5 * (props.scenes.length - 1);
+    const total = props.scenes.reduce((sum, scene) => sum + scene.duration, 0) - overlap;
+    if (Math.abs(total - 30) > 0.05) throw new Error(`Scenes must add up to the narration length, got ${total}`);
+    if (props.scenes[2].image !== 'i0.png') throw new Error('Images must be reused in rotation when scenes outnumber images');
+    const words = estimateWordTimings('alpha beta gamma.', 6);
+    const ordered = words.every((word, i) => word.end > word.start && (i === 0 || word.start >= words[i - 1].end - 0.001));
+    if (words.length !== 3 || !ordered || words[2].end > 6) throw new Error('Word timings must be ordered and inside the scene');
+    // Speech alignment: words land where the audio is loud, and silence between them stays empty.
+    const { alignToSpeech, buildScenePlan } = require('./utils/remotion-renderer');
+    const plan = buildScenePlan({ title: 'T', hook: { text: 'aaa bbb' }, conclusion: { finalThought: 'ccc ddd' } });
+    const envelope = [...Array(60).fill(0.9), ...Array(60).fill(0), ...Array(60).fill(0.9)];
+    const aligned = alignToSpeech(plan, envelope, 6);
+    if (!aligned || aligned.length !== 2) throw new Error('Speech alignment must return one entry per scene');
+    if (aligned[0].words.some(word => word.start < -0.001) || aligned[1].start < 1.5) {
+      throw new Error('The second scene must start after the silent gap, not at the average position');
+    }
+    if (alignToSpeech(plan, new Array(60).fill(0), 6) !== null) throw new Error('Silent audio must fall back to estimated timing');
+    const { narrationSegments, formatNarrationText } = require('./utils/narration-script');
+    const spoken = formatNarrationText({ hook: { text: 'Hook' }, mainContent: { sections: [{ title: 'S', content: ['one', '[note]', 'two'] }] } }, 'vi');
+    if (!spoken.includes('Phần 1: S') || spoken.includes('[note]') || spoken.includes('Section')) {
+      throw new Error('Narration must use the channel language labels and skip bracketed placeholders');
+    }
+    if (narrationSegments({ title: 'T' }).length !== 0) throw new Error('An empty script has nothing to narrate');
+    if (buildRenderProps({ script: { title: 'T', hook: { text: 'x' } }, imageNames: [], totalSeconds: 5 }).scenes[0].image !== null) {
+      throw new Error('A scene without images must render without a background image');
+    }
+  }
+
 }
 
 // Run tests if called directly
