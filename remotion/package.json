@@ -1,0 +1,16 @@
+{
+  "name": "lumen-remotion-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional Remotion renderer for animated scenes, moving titles and word-by-word captions",
+  "scripts": {
+    "studio": "remotion studio src/index.jsx",
+    "render": "remotion render src/index.jsx LumenVideo"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.538",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "4.0.538"
+  }
+}

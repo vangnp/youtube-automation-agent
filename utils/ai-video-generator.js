@@ -7,6 +7,7 @@ const sharp = require('sharp');
 const { Logger } = require('./logger');
 const { runFFmpeg, getMediaDuration, checkFFmpeg, ffmpegInstallHint } = require('./ffmpeg');
 const { MediaGenerationService } = require('./media-generation-service');
+const remotionRenderer = require('./remotion-renderer');
 
 class AIVideoGenerator {
   constructor(credentials, options = {}) {
@@ -476,6 +477,21 @@ class AIVideoGenerator {
 
     if (!(await checkFFmpeg())) {
       throw new Error(ffmpegInstallHint());
+    }
+
+    // Optional animated renderer (VIDEO_RENDERER=remotion). Any failure falls through to the
+    // FFmpeg slideshow below, so enabling it can never leave a production without a video.
+    if (remotionRenderer.isRemotionEnabled()) {
+      try {
+        const totalSeconds = await this.resolveSlideshowDuration(script, audioPath);
+        const imagePaths = await this.filterLocalImageAssets(visualAssets);
+        await remotionRenderer.renderWithRemotion({
+          script, imagePaths, audioPath, outputPath, totalSeconds, logger: this.logger
+        });
+        return outputPath;
+      } catch (error) {
+        this.logger.warn(`Remotion render failed; using the FFmpeg slideshow instead: ${error.message}`);
+      }
     }
 
     const { chromium } = require('playwright');

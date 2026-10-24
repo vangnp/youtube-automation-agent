@@ -90,3 +90,8 @@ data/thumbnails/
 
 # Claude worktrees
 .claude/worktrees/
+
+# Remotion renderer
+remotion/node_modules/
+remotion/out/
+remotion_job_*/

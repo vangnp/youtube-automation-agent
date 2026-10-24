@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1400" viewBox="0 0 1200 1400">
+<title>Yang Tò Mò — mascot vector có thể chỉnh sửa</title>
+<desc>Phiên bản SVG nâng cấp với các lớp màu, viền, highlight và nhóm bộ phận riêng. Nền trong suốt.</desc>
+<defs>
+  <linearGradient id="goldFur" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#FFE18B"/><stop offset=".42" stop-color="#FFBD43"/><stop offset="1" stop-color="#E8871B"/></linearGradient>
+  <linearGradient id="maneDeep" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFD56A"/><stop offset=".55" stop-color="#F5A52B"/><stop offset="1" stop-color="#C96C17"/></linearGradient>
+  <linearGradient id="horn" x1="0" y1="0" x2="1" y2=".9"><stop stop-color="#FFD98B"/><stop offset=".3" stop-color="#C98536"/><stop offset=".7" stop-color="#8B4B21"/><stop offset="1" stop-color="#5E321D"/></linearGradient>
+  <linearGradient id="wool" x1="0" y1="0" x2=".25" y2="1"><stop stop-color="#FFFEF8"/><stop offset=".55" stop-color="#FFF2D9"/><stop offset="1" stop-color="#E8CDA7"/></linearGradient>
+  <linearGradient id="cape" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#164665"/><stop offset=".5" stop-color="#092B45"/><stop offset="1" stop-color="#04182C"/></linearGradient>
+  <radialGradient id="eye" cx=".35" cy=".25" r=".8"><stop stop-color="#4C9BC4"/><stop offset=".4" stop-color="#193E5A"/><stop offset="1" stop-color="#091827"/></radialGradient>
+  <radialGradient id="bulb" cx=".35" cy=".2" r=".9"><stop stop-color="#FFFDE4"/><stop offset=".35" stop-color="#FFE985"/><stop offset="1" stop-color="#FFB72D"/></radialGradient>
+  <filter id="softShadow" x="-30%" y="-30%" width="160%" height="170%"><feGaussianBlur in="SourceAlpha" stdDeviation="7"/><feOffset dx="0" dy="8" result="off"/><feColorMatrix in="off" type="matrix" values="0 0 0 0 .18 0 0 0 0 .09 0 0 0 0 .02 0 0 0 .25 0"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <style>
+    .ink{stroke:#67391F;stroke-width:10;stroke-linecap:round;stroke-linejoin:round}
+    .ink2{stroke:#67391F;stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
+    .lightline{fill:none;stroke:#FFE8A4;stroke-width:8;stroke-linecap:round;stroke-linejoin:round}
+    .furline{fill:none;stroke:#E78C1E;stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
+  </style>
+</defs>
+<!-- Transparent canvas. Every major part has its own named group. -->
+<g id="tail">
+ <path d="M687 1068 C818 1122 935 1097 963 1008" fill="none" stroke="#E88C1C" stroke-width="27" stroke-linecap="round"/>
+ <path d="M687 1068 C818 1122 935 1097 963 1008" fill="none" stroke="#FFE4A0" stroke-width="8" stroke-linecap="round"/>
+ <path d="M932 985 C904 956 930 914 962 917 C983 883 1026 906 1019 937 C1052 956 1032 1000 1001 1000 C979 1031 941 1015 932 985Z" fill="url(#goldFur)" class="ink"/>
+ <path d="M950 943 Q968 965 950 989 M980 930 Q993 953 979 978 M1000 953 Q1015 971 994 990" class="lightline" stroke-width="5"/>
+</g>
+<g id="legs">
+ <path d="M425 1083 Q397 1144 426 1181 Q449 1200 483 1177 L492 1100Z" fill="url(#wool)" class="ink"/>
+ <path d="M574 1095 Q559 1150 587 1182 Q614 1200 644 1175 L641 1098Z" fill="url(#wool)" class="ink"/>
+ <path d="M426 1167 Q451 1152 480 1173 M588 1168 Q614 1151 640 1172" fill="none" stroke="#D9B487" stroke-width="7" stroke-linecap="round"/>
+</g>
+<g id="body" filter="url(#softShadow)">
+ <path d="M390 735 Q348 797 370 894 L407 1091 Q507 1130 651 1091 L699 893 Q715 798 674 735Z" fill="url(#wool)" class="ink"/>
+ <g fill="#FFF9EC" stroke="#E4C9A2" stroke-width="5">
+  <path d="M415 802 Q437 776 458 802 Q480 777 501 802 Q522 778 543 803 Q566 777 589 804 Q611 780 633 806" fill="none" stroke-linecap="round"/>
+  <path d="M416 873 Q438 850 460 875 Q483 851 504 875 Q526 851 549 875 Q572 852 594 875 Q617 851 644 876" fill="none" stroke-linecap="round"/>
+  <path d="M439 956 Q460 935 480 956 Q504 932 527 956 Q550 934 574 956 Q596 936 620 957" fill="none" stroke-linecap="round"/>
+  <path d="M456 1024 Q479 1004 501 1025 Q525 1004 548 1025 Q571 1004 596 1025" fill="none" stroke-linecap="round"/>
+ </g>
+</g>
+<g id="cape">
+ <path d="M388 745 Q324 780 294 920 Q334 980 425 1007 L492 831Z" fill="url(#cape)" stroke="#06192A" stroke-width="12" stroke-linejoin="round"/>
+ <path d="M672 744 Q743 784 773 918 Q733 978 644 1008 L575 831Z" fill="url(#cape)" stroke="#06192A" stroke-width="12" stroke-linejoin="round"/>
+ <path d="M301 920 Q342 961 423 987 L414 1010 Q333 990 294 929Z" fill="#F8B632" stroke="#F8B632" stroke-width="4"/>
+ <path d="M766 918 Q725 960 647 987 L655 1010 Q734 990 773 928Z" fill="#F8B632" stroke="#F8B632" stroke-width="4"/>
+ <path d="M387 752 Q527 816 672 752" fill="none" stroke="#EBA62E" stroke-width="11"/>
+ <path d="M425 782 Q524 821 630 782" fill="none" stroke="#2A5871" stroke-width="5"/>
+ <g id="cape-medallion">
+  <circle cx="530" cy="803" r="38" fill="#F8B832" stroke="#70411F" stroke-width="8"/>
+  <circle cx="530" cy="803" r="27" fill="#FFDA6C" stroke="#FFF0B7" stroke-width="4"/>
+  <path d="M530 781 L537 796 L553 798 L541 809 L544 825 L530 816 L516 825 L519 809 L507 798 L523 796Z" fill="#A96720" stroke="#FFF1B8" stroke-width="3"/>
+ </g>
+ <path d="M336 835 Q365 861 392 866 M696 836 Q670 859 648 867" fill="none" stroke="#32617A" stroke-width="8" stroke-linecap="round"/>
+</g>
+<g id="arms">
+ <path d="M380 807 Q337 814 329 860 Q323 893 350 900 Q375 903 386 870 L415 844Z" fill="url(#wool)" class="ink"/>
+ <path d="M683 797 Q719 792 740 828 L759 866 Q764 894 737 904 Q712 908 703 880 L674 841Z" fill="url(#wool)" class="ink"/>
+ <path d="M337 868 Q355 884 376 868 M718 875 Q737 885 753 866" fill="none" stroke="#D9B487" stroke-width="6" stroke-linecap="round"/>
+</g>
+<g id="head" filter="url(#softShadow)">
+ <!-- golden mane base with layered locks -->
+ <path d="M326 431 Q283 391 306 344 Q288 292 337 270 Q348 217 405 224 Q440 186 482 218 Q531 186 564 223 Q615 213 635 262 Q684 274 677 322 Q710 362 682 403 Q701 448 669 481 Q674 529 631 549 Q611 596 561 590 Q521 619 484 590 Q439 616 407 587 Q358 598 339 556 Q293 545 297 499 Q271 466 326 431Z" fill="url(#maneDeep)" class="ink"/>
+ <path d="M321 357 Q341 329 369 347 M318 448 Q337 469 357 455 M356 529 Q378 551 399 532 M592 548 Q615 557 630 534 M652 449 Q672 459 678 440 M613 315 Q633 333 650 325" class="lightline" stroke-width="7"/>
+ <path d="M347 284 Q370 263 392 282 M431 237 Q455 220 472 240 M524 236 Q548 221 563 244 M590 274 Q611 270 625 293" fill="none" stroke="#FFE7A0" stroke-width="8" stroke-linecap="round"/>
+ <!-- ears -->
+ <path d="M330 419 Q274 392 251 427 Q230 464 285 492 L340 467Z" fill="url(#wool)" class="ink"/>
+ <path d="M659 416 Q714 390 736 426 Q756 463 703 491 L649 465Z" fill="url(#wool)" class="ink"/>
+ <path d="M266 438 Q294 435 314 463 M720 438 Q693 436 674 463" fill="none" stroke="#E9A39A" stroke-width="12" stroke-linecap="round"/>
+ <!-- horns -->
+ <g id="horn-left">
+  <path d="M360 366 C315 391 267 372 252 327 C237 283 260 244 295 245 C326 246 342 276 321 299 C308 314 287 301 293 287 C270 300 288 339 315 335 C339 332 353 310 366 286Z" fill="url(#horn)" class="ink"/>
+  <path d="M264 294 Q286 306 308 282 M274 331 Q301 349 325 326 M280 262 Q304 266 316 283" fill="none" stroke="#F5C46D" stroke-width="7" stroke-linecap="round"/>
+  <path d="M281 279 Q296 284 304 297" fill="none" stroke="#6E3D20" stroke-width="5" stroke-linecap="round"/>
+ </g>
+ <g id="horn-right">
+  <path d="M628 366 C673 391 721 372 736 327 C751 283 728 244 693 245 C662 246 646 276 667 299 C680 314 701 301 695 287 C718 300 700 339 673 335 C649 332 635 310 622 286Z" fill="url(#horn)" class="ink"/>
+  <path d="M724 294 Q702 306 680 282 M714 331 Q687 349 663 326 M708 262 Q684 266 672 283" fill="none" stroke="#F5C46D" stroke-width="7" stroke-linecap="round"/>
+  <path d="M697 279 Q682 284 674 297" fill="none" stroke="#6E3D20" stroke-width="5" stroke-linecap="round"/>
+ </g>
+ <!-- face -->
+ <path d="M364 363 Q387 317 438 318 Q495 296 545 319 Q598 324 620 370 Q646 417 621 470 Q598 522 542 536 Q488 551 438 531 Q384 516 356 471 Q334 414 364 363Z" fill="url(#wool)" class="ink"/>
+ <!-- face shading -->
+ <path d="M366 439 Q380 495 431 514 M611 438 Q599 492 551 514" fill="none" stroke="#E8CDAA" stroke-width="8" stroke-linecap="round"/>
+ <!-- wool curls -->
+ <g id="forehead-wool" fill="#FFFCF4" stroke="#E4C7A1" stroke-width="6" stroke-linejoin="round">
+  <circle cx="405" cy="319" r="43"/><circle cx="441" cy="291" r="48"/><circle cx="487" cy="300" r="48"/><circle cx="526" cy="320" r="39"/>
+  <circle cx="411" cy="350" r="37"/><circle cx="457" cy="346" r="42"/><circle cx="501" cy="348" r="39"/>
+ </g>
+ <g fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round">
+  <path d="M414 286 Q429 266 444 281 M470 273 Q487 262 500 278 M391 319 Q400 306 413 313"/>
+ </g>
+ <!-- eyebrows -->
+ <g id="eyebrows" fill="none" stroke="#744325" stroke-width="9" stroke-linecap="round">
+  <path d="M386 391 Q405 370 426 388"/>
+  <path d="M535 389 Q555 370 575 393"/>
+ </g>
+ <!-- eyes with individually editable pupils -->
+ <g id="eye-left">
+  <ellipse cx="410" cy="426" rx="31" ry="39" fill="#FFFDF8" stroke="#4D2B1A" stroke-width="6"/>
+  <ellipse cx="417" cy="431" rx="22" ry="31" fill="url(#eye)"/>
+  <ellipse cx="421" cy="435" rx="13" ry="22" fill="#0A1C2B"/>
+  <circle cx="426" cy="415" r="10" fill="#FFFFFF"/><circle cx="407" cy="442" r="5" fill="#FFFFFF"/>
+ </g>
+ <g id="eye-right">
+  <ellipse cx="551" cy="426" rx="30" ry="39" fill="#FFFDF8" stroke="#4D2B1A" stroke-width="6"/>
+  <ellipse cx="557" cy="431" rx="21" ry="31" fill="url(#eye)"/>
+  <ellipse cx="561" cy="435" rx="12" ry="22" fill="#0A1C2B"/>
+  <circle cx="566" cy="415" r="9" fill="#FFFFFF"/><circle cx="548" cy="443" r="5" fill="#FFFFFF"/>
+ </g>
+ <g id="cheeks" fill="#F4A19A" opacity=".7"><ellipse cx="371" cy="466" rx="23" ry="13"/><ellipse cx="591" cy="466" rx="23" ry="13"/></g>
+ <g id="nose-mouth">
+  <path d="M465 451 Q480 439 495 451 Q488 466 480 467 Q471 465 465 451Z" fill="#D68B4B" stroke="#704021" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M480 466 Q477 487 457 487 M480 466 Q487 486 507 480" fill="none" stroke="#704021" stroke-width="6" stroke-linecap="round"/>
+  <path d="M458 486 Q480 508 506 481 Q502 514 481 515 Q464 512 458 486Z" fill="#D9514E" stroke="#704021" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M468 492 Q482 498 497 490" fill="none" stroke="#FFF1DC" stroke-width="6" stroke-linecap="round"/>
+ </g>
+ <!-- layered mane locks around cheeks -->
+</g>
+<g id="prop-lightbulb" filter="url(#softShadow)">
+ <path d="M764 481 Q731 454 737 414 Q744 369 789 362 Q835 358 853 397 Q873 439 838 473 L832 495 L779 495Z" fill="url(#bulb)" stroke="#8D511D" stroke-width="8" stroke-linejoin="round"/>
+ <path d="M779 495 L832 495 L828 513 L783 513Z" fill="#274A5A" stroke="#09253A" stroke-width="7"/>
+ <path d="M786 519 L825 519 L819 533 L792 533Z" fill="#E8A12C" stroke="#8D511D" stroke-width="5"/>
+ <path d="M768 416 Q778 390 796 391 Q817 391 822 415 Q823 430 807 445 L806 466 L786 466 L785 444 Q769 431 768 416Z" fill="none" stroke="#FFFEF2" stroke-width="7" stroke-linejoin="round"/>
+ <path d="M787 474 L807 474" stroke="#FFFEF2" stroke-width="6" stroke-linecap="round"/>
+ <g fill="none" stroke="#F6B82F" stroke-width="8" stroke-linecap="round"><path d="M731 383 L716 370"/><path d="M863 376 L879 360"/><path d="M872 421 L894 421"/><path d="M754 349 L748 331"/></g>
+</g>
+<g id="decorative-stars" fill="#F7B82E">
+ <path d="M258 667 L270 696 L299 708 L270 720 L258 749 L246 720 L217 708 L246 696Z"/>
+ <path d="M720 592 L728 612 L748 620 L728 628 L720 648 L712 628 L692 620 L712 612Z"/>
+ <path d="M316 721 L322 735 L336 741 L322 747 L316 761 L310 747 L296 741 L310 735Z"/>
+</g>
+</svg>
