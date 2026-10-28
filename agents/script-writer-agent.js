@@ -1,5 +1,7 @@
 const { Logger } = require('../utils/logger');
 const { AITextService } = require('../utils/ai-text-service');
+const { phrases, stripLeadingGreeting } = require('../utils/script-phrases');
+const { lengthProfile } = require('../utils/video-length');
 
 class ScriptWriterAgent {
   constructor(db, credentials) {
@@ -106,6 +108,7 @@ class ScriptWriterAgent {
       return null;
     }
 
+    const profile = lengthProfile(strategy.requestedLengthKey);
     const prompt = `You are writing a YouTube script plan.
 Return only valid JSON with this exact shape:
 {
@@ -125,6 +128,8 @@ Style/content type: ${strategy.contentType}
 Angle: ${strategy.angle}
 Target audience: ${strategy.targetAudience}
 Desired length: ${strategy.requestedLength || process.env.DEFAULT_VIDEO_LENGTH || '8-12 minutes'}
+Greeting: do not greet the viewer anywhere in the hook or the sections (no "Xin chào", "Hello", "Chào mừng"); the channel's fixed intro already does that once. Start the hook with the question or surprise itself.
+Depth: for an explainer, go beyond definitions. Explain why the idea works and how, give a worked example with concrete numbers, state the assumptions and where the idea stops working, and clear up common misconceptions. Write 6 to 10 spoken sentences per section.
 Tone: ${template.tone}
 Pacing: ${template.pacing}
 Brand voice: ${strategy.brandVoice || 'clear, credible, and engaging'}
@@ -135,11 +140,11 @@ Channel constraints: ${strategy.channelConstraints || 'none beyond the factual-s
 Preferred call to action: ${strategy.callToAction || 'invite the viewer to subscribe'}
 Keywords: ${(strategy.keywords || []).join(', ')}
 Research sources: ${JSON.stringify(strategy.researchSources || [])}
-Avoid fabricated statistics, unsupported claims, and fake urgency. List every externally verifiable factual claim in claims. Use only exact URLs from Research sources; use an empty sourceUrls array when the supplied sources do not support a claim.`;
+${strategy.reviewFeedback ? `The channel owner read the previous draft and asked for these changes. Apply them: ${strategy.reviewFeedback}\n` : ''}Avoid fabricated statistics, unsupported claims, and fake urgency. List every externally verifiable factual claim in claims. Write each claim as one specific, checkable statement (who, what, when or how much), never a vague one such as "greatly improved" or a statement that joins several facts, so a reviewer can find a source for it. Use only exact URLs from Research sources; use an empty sourceUrls array when the supplied sources do not support a claim.`;
 
     try {
       const response = await this.aiTextService.generateText(prompt, {
-        maxTokens: 1800,
+        maxTokens: profile.scriptTokens,
         temperature: 0.7
       });
       const parsed = this.parseAIJsonResponse(response);
@@ -200,7 +205,7 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
     const text = typeof hook === 'object' && hook !== null ? hook.text : hook;
     return {
       type: 'ai',
-      text: String(text).trim(),
+      text: stripLeadingGreeting(String(text).trim()),
       duration: '0:00-0:05'
     };
   }
@@ -216,9 +221,10 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
         const rawContent = Array.isArray(section.content)
           ? section.content
           : [section.content || section.summary || section.description];
+        // The fixed intro greets once; a section that starts "Xin chào, Yang đây!" again is cut.
         const content = rawContent
           .filter(Boolean)
-          .map(line => String(line).trim())
+          .map(line => stripLeadingGreeting(String(line).trim(), { minLength: 1, allowEmpty: true }))
           .filter(Boolean);
 
         return {
@@ -247,20 +253,20 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
     if (cta && typeof cta === 'object') {
       return {
         type: 'call_to_action',
-        subscribe: String(cta.subscribe || cta.text || `Subscribe for more on ${strategy.topic}.`),
-        like: String(cta.like || 'Like this video if it helped.'),
-        comment: String(cta.comment || `Share your experience with ${strategy.topic} in the comments.`),
-        nextVideo: String(cta.nextVideo || 'Watch the next related video for more context.'),
+        subscribe: String(cta.subscribe || cta.text || phrases().aiSubscribe(strategy.topic)),
+        like: String(cta.like || phrases().aiLike),
+        comment: String(cta.comment || phrases().aiComment(strategy.topic)),
+        nextVideo: String(cta.nextVideo || phrases().aiNext),
         duration: '15 seconds'
       };
     }
 
     return {
       type: 'call_to_action',
-      subscribe: String(cta || `Subscribe for more practical videos about ${strategy.topic}.`),
-      like: 'Like this video if it helped.',
-      comment: `Share your experience with ${strategy.topic} in the comments.`,
-      nextVideo: 'Watch the next related video for more context.',
+      subscribe: String(cta || phrases().aiSubscribeText(strategy.topic)),
+      like: phrases().aiLike,
+      comment: phrases().aiComment(strategy.topic),
+      nextVideo: phrases().aiNext,
       duration: '15 seconds'
     };
   }
@@ -346,10 +352,10 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
 
   async generateIntroduction(strategy) {
     return {
-      greeting: "Hey everyone, welcome back to the channel!",
-      topicIntro: `Today, we're diving deep into ${strategy.topic}.`,
-      valueProposition: `By the end of this video, you'll understand exactly ${this.getValueProposition(strategy)}.`,
-      credibility: this.getCredibilityStatement(strategy),
+      greeting: phrases().greeting,
+      topicIntro: phrases().topicIntro(strategy.topic),
+      valueProposition: phrases().valueProposition(strategy.topic, this.getValueProposition(strategy)),
+      credibility: phrases().credibility || this.getCredibilityStatement(strategy),
       duration: '0:05-0:20'
     };
   }
@@ -653,16 +659,9 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
   async generateConclusion(strategy) {
     return {
       type: 'conclusion',
-      title: 'Wrapping Up',
-      recap: [
-        `So that's everything you need to know about ${strategy.topic}.`,
-        'We covered the key points:',
-        '- The fundamentals and why they matter',
-        '- Practical steps to get started',
-        '- Real-world applications and examples',
-        '- Tips for long-term success'
-      ],
-      finalThought: `Remember, ${strategy.topic} is a journey, not a destination. Keep learning and improving!`,
+      title: phrases().conclusionTitle,
+      recap: phrases().recap(strategy.topic),
+      finalThought: phrases().finalThought(strategy.topic),
       duration: '30 seconds'
     };
   }
@@ -670,10 +669,10 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
   async generateCTA(strategy) {
     return {
       type: 'call_to_action',
-      subscribe: "If you found this helpful, make sure to subscribe and hit the notification bell!",
-      like: "Give this video a thumbs up if you learned something new.",
-      comment: `Let me know in the comments: What's your experience with ${strategy.topic}?`,
-      nextVideo: "Check out this related video for more insights.",
+      subscribe: phrases().ctaSubscribe,
+      like: phrases().ctaLike,
+      comment: phrases().ctaComment(strategy.topic),
+      nextVideo: phrases().ctaNext,
       duration: '15 seconds'
     };
   }

@@ -134,6 +134,8 @@ class SceneRepairService {
 
   async ensureManifest(bundle) {
     if (bundle.scenes?.length) return bundle.scenes;
+    // Canvas story videos are drawn from a storyboard, not from the script scenes this manifest describes
+    if (bundle.assets?.story) return [];
     const scenes = buildInitialSceneManifest(bundle, bundle.assets?.finalVideo?.provider || {});
     await this.initializeAudioSegments(bundle, scenes);
     return this.db.replaceProductionScenes(bundle.id, scenes);
@@ -186,6 +188,7 @@ class SceneRepairService {
   async getEditableBundle(productionId) {
     const bundle = await this.db.getProductionBundle(productionId);
     if (!bundle) throw this.error('Content not found', 404);
+    if (bundle.assets?.story) throw this.error('This video is drawn from a storyboard, so single scenes cannot be repaired here yet', 409);
     if (bundle.schedule || bundle.review_status === 'approved') {
       throw this.error('Scene repair is locked after content is approved or scheduled', 409);
     }

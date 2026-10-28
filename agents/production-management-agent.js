@@ -5,6 +5,11 @@ const { AIVideoGenerator } = require('../utils/ai-video-generator');
 const { SceneRepairService } = require('../utils/scene-repair-service');
 const { contentLanguage } = require('../utils/content-language');
 const { formatNarrationText } = require('../utils/narration-script');
+const { AITextService } = require('../utils/ai-text-service');
+const { writeStoryboard } = require('../utils/storyboard-writer');
+const { buildStoryVideo } = require('../utils/story-video-builder');
+const { slugify } = require('../utils/story-templates');
+const remotionRenderer = require('../utils/remotion-renderer');
 
 class ProductionManagementAgent {
   constructor(db, credentials) {
@@ -15,6 +20,7 @@ class ProductionManagementAgent {
     this.assets = new Map();
     this.aiVideoGenerator = new AIVideoGenerator(credentials, { db });
     this.sceneRepair = new SceneRepairService(db, this.aiVideoGenerator, { logger: this.logger });
+    this.aiTextService = new AITextService(credentials?.credentials || credentials || {});
   }
 
   async initialize() {
@@ -56,6 +62,7 @@ class ProductionManagementAgent {
       
       // Create production entry
       const productionId = this.generateProductionId();
+      const storyMode = this.isStoryVideoEnabled();
       
       const productionData = {
         id: productionId,
@@ -66,7 +73,8 @@ class ProductionManagementAgent {
         status: 'processing',
         assets: {
           script: await this.processScript(script),
-          thumbnail: await this.processThumbnail(thumbnail, script),
+          // With the canvas story renderer the thumbnail is drawn together with the video
+          thumbnail: storyMode ? null : await this.processThumbnail(thumbnail, script),
           audio: null, // Will be generated later
           video: null, // Will be generated later
           captions: null // Will be generated later
@@ -93,20 +101,26 @@ class ProductionManagementAgent {
       // Save to database
       await this.db.saveProductionData(productionData);
       
-      // Generate video content
-      await this.generateVideoContent(productionData);
-      
-      // Generate audio narration
-      await this.generateAudioNarration(productionData);
-      
-      // Generate captions
-      await this.generateCaptions(productionData);
-      
-      // Final assembly
-      await this.assembleVideo(productionData);
+      // Canvas story video first; any failure falls back to the classic image/slideshow pipeline
+      const storyProduced = storyMode && await this.produceStoryVideo(productionData);
+      if (!storyProduced) {
+        if (!productionData.assets.thumbnail) productionData.assets.thumbnail = await this.processThumbnail(thumbnail, script);
 
-      // Persist a scene-addressable production manifest for selective review and repair.
-      await this.sceneRepair.initializeProduction(productionData, this.aiVideoGenerator.lastVideoResult || {});
+        // Generate video content
+        await this.generateVideoContent(productionData);
+
+        // Generate audio narration
+        await this.generateAudioNarration(productionData);
+
+        // Generate captions
+        await this.generateCaptions(productionData);
+
+        // Final assembly
+        await this.assembleVideo(productionData);
+
+        // Persist a scene-addressable production manifest for selective review and repair.
+        await this.sceneRepair.initializeProduction(productionData, this.aiVideoGenerator.lastVideoResult || {});
+      }
 
       // Mark as ready — or simulated, when no real video could be produced
       const simulated = Boolean(productionData.assets.finalVideo?.simulated);
@@ -125,6 +139,90 @@ class ProductionManagementAgent {
     } catch (error) {
       this.logger.error('Failed to process content:', error);
       throw error;
+    }
+  }
+
+  // VIDEO_RENDERER=remotion plus an installed renderer turns on the canvas story video; STORY_VIDEO=off keeps
+  // the classic pipeline even then.
+  isStoryVideoEnabled() {
+    return remotionRenderer.isRemotionEnabled()
+      && remotionRenderer.isRemotionInstalled()
+      && String(process.env.STORY_VIDEO || 'on').toLowerCase() !== 'off';
+  }
+
+  // A readable, unique folder name for this video under data/projects (and data/videos/<slug>.mp4).
+  // A retry or resume of the same job gets its folder back, so the storyboard and narration are reused.
+  async claimProjectSlug(title, productionId, jobId = null) {
+    const root = path.join(__dirname, '..', 'data');
+    const base = slugify(title);
+    for (let attempt = 1; attempt < 100; attempt++) {
+      const slug = attempt === 1 ? base : `${base}-${attempt}`;
+      const projectFile = path.join(root, 'projects', slug, 'project.json');
+      const owner = await fs.readFile(projectFile, 'utf8').then(text => JSON.parse(text)).catch(() => null);
+      const taken = await fs.access(path.join(root, 'videos', `${slug}.mp4`)).then(() => true).catch(() => false);
+      const reused = Boolean(owner && (owner.productionId === productionId || (jobId && owner.jobId === jobId)));
+      if (reused || (!owner && !taken)) {
+        await fs.mkdir(path.dirname(projectFile), { recursive: true });
+        await fs.writeFile(projectFile, JSON.stringify({ productionId, jobId, title, createdAt: owner?.createdAt || new Date().toISOString() }, null, 2));
+        return { slug, reused };
+      }
+    }
+    return { slug: `${base}-${productionId.slice(-6)}`, reused: false };
+  }
+
+  // Script -> storyboard (AI plans the scenes) -> narration, word-synced captions, canvas scenes, thumbnail.
+  // Returns true when the production now has its final video, false when the classic pipeline must run.
+  async produceStoryVideo(productionData) {
+    const { script, strategy } = productionData;
+    try {
+      this.logger.info('Planning the storyboard for the canvas video...');
+      const language = contentLanguage();
+      const { slug, reused } = await this.claimProjectSlug(script.title || strategy?.topic || 'video', productionData.id, productionData.jobId);
+      let planned = null;
+      if (reused) {
+        // same job again: keep the storyboard (and so the saved narration) instead of asking the model again
+        const saved = await fs.readFile(path.join(__dirname, '..', 'data', 'projects', slug, 'script', 'storyboard.json'), 'utf8').then(text => JSON.parse(text)).catch(() => null);
+        if (saved?.slug === slug && Array.isArray(saved.scenes) && saved.scenes.length) planned = { storyboard: saved, source: 'saved' };
+      }
+      const { storyboard, source } = planned || await writeStoryboard({ script, strategy, aiTextService: this.aiTextService, language, slug, voice: null });
+      const result = await buildStoryVideo(storyboard, { aiVideoGenerator: this.aiVideoGenerator, log: message => this.logger.info(message) });
+
+      const [video, thumbnail] = await Promise.all([fs.stat(result.videoPath), fs.stat(result.thumbnailPath)]);
+      const meta = result.narrationMeta || {};
+      const now = new Date().toISOString();
+      const seconds = Math.round(result.durationSeconds);
+      productionData.assets.thumbnail = { path: result.thumbnailPath, originalPath: null, dimensions: { width: 1280, height: 720 }, fileSize: thumbnail.size, generatedWith: 'canvas' };
+      productionData.assets.audio = {
+        path: result.audioPath, duration: seconds, format: 'mp3', generatedWith: 'AI', quality: 'high', status: 'ready', simulated: false,
+        provider: meta.provider || null, model: meta.model || null, externalTaskId: meta.externalTaskId || null,
+        generatedAt: meta.generatedAt || now, cost: meta.cost || {}, error: null, intentionalSilence: false
+      };
+      productionData.assets.captions = { path: result.captionsPath, format: 'srt', language, autoGenerated: true, timing: result.timing };
+      productionData.assets.video = { visualAssets: [], duration: seconds, format: 'mp4', resolution: '1080x1920', fps: 30, generatedWith: 'canvas' };
+      productionData.assets.finalVideo = {
+        path: result.videoPath, fileSize: video.size, duration: seconds, generatedWith: 'AI', resolution: '1080x1920', format: 'mp4',
+        provider: { actualProvider: 'remotion-canvas', model: 'story-video' }
+      };
+      productionData.assets.story = { slug, projectDir: result.projectDir, source, scenes: storyboard.scenes.length, captionTiming: result.timing };
+      productionData.estimatedDuration = seconds;
+      productionData.timeline.audioGenerated = now;
+      productionData.timeline.videoGenerated = now;
+      productionData.timeline.captionsGenerated = now;
+
+      // The script files the dashboard shows should match what the narrator actually says
+      const narration = storyboard.scenes.map(scene => scene.narration).join('\n\n') + '\n';
+      await fs.writeFile(productionData.assets.script.ttsPath, narration);
+      await fs.writeFile(path.join(result.projectDir, 'script', 'script.json'), JSON.stringify(script, null, 2));
+      await fs.writeFile(path.join(result.projectDir, 'metadata.json'), JSON.stringify({
+        productionId: productionData.id, topic: strategy?.topic || null, title: storyboard.title, description: storyboard.description,
+        tags: storyboard.tags, seo: productionData.seo || null, storyboardSource: source, createdAt: now
+      }, null, 2));
+      this.logger.info(`Story video ready: ${path.relative(path.join(__dirname, '..'), result.videoPath)}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Canvas story video failed, using the classic pipeline: ${error.message}`);
+      productionData.assets.story = null;
+      return false;
     }
   }
 

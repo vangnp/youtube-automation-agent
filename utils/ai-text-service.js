@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const { Logger } = require('./logger');
+const { collectGeminiKeys, createGeminiClient } = require('./gemini-keys');
 
 const GEMINI_MODELS = [
   'gemini-3.7-flash',
@@ -101,9 +102,8 @@ class AITextService {
       }
     }
 
-    const geminiKey = credentials.gemini?.apiKey || process.env.GEMINI_API_KEY;
-    if (geminiKey) {
-      return this._initGemini(geminiKey, credentials.gemini?.model);
+    if (collectGeminiKeys(credentials.gemini).length) {
+      return this._initGemini(credentials.gemini, credentials.gemini?.model);
     }
 
     // Checked last so an explicit cloud key still wins, matching prior behaviour.
@@ -132,13 +132,12 @@ class AITextService {
     this.logger.info(`${preset.name} initialized (${detail})`);
   }
 
-  _initGemini(apiKey, model) {
+  _initGemini(stored, model) {
     try {
-      const { GoogleGenAI } = require('@google/genai');
-      this.gemini = new GoogleGenAI({ apiKey });
+      this.gemini = createGeminiClient(stored, this.logger);
       this.model = model || GEMINI_DEFAULT_MODEL;
       this.providerName = 'Google Gemini';
-      this.logger.info(`Gemini initialized (model: ${this.model})`);
+      this.logger.info(`Gemini initialized (model: ${this.model}, ${this.gemini.size} key${this.gemini.size === 1 ? '' : 's'})`);
     } catch (error) {
       this.logger.error('Failed to initialize Gemini:', error.message);
     }

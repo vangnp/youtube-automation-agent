@@ -19,6 +19,9 @@
     "agent:analytics": "node agents/analytics-optimization-agent.js",
     "credentials:setup": "node utils/credential-manager.js setup",
     "remotion:install": "npm install --prefix remotion",
+    "video:story": "node scripts/make-story-video.js",
+    "video:gallery": "node scripts/template-gallery.js",
+    "whisper:install": "node remotion/tools/setup-whisper.js",
     "remotion:studio": "npm --prefix remotion run studio",
     "lint": "eslint ."
   },

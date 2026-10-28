@@ -95,3 +95,9 @@ data/thumbnails/
 remotion/node_modules/
 remotion/out/
 remotion_job_*/
+
+# Whisper build and models
+remotion/.whisper/
+
+# Generated videos, projects, narration, branding builds and database backups
+data/

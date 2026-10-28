@@ -3,6 +3,7 @@ import {
   AbsoluteFill, Audio, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig
 } from 'remotion';
 import { Mascot } from './Mascot.jsx';
+import { Backdrop, ProceduralVisual } from './visuals.jsx';
 
 const FADE_SECONDS = 0.5;
 const FONT = "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
@@ -27,21 +28,21 @@ const KenBurns = ({ src, duration, index }) => {
 };
 
 // Words slide up and fade in one after another.
-const AnimatedTitle = ({ text, index }) => {
+const AnimatedTitle = ({ text, index, hasMascot }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const words = String(text || '').split(/\s+/).filter(Boolean);
   const big = index === 0;
   return (
     <div style={{
-      position: 'absolute', top: big ? '30%' : '12%', left: 0, right: 0, padding: '0 140px',
+      position: 'absolute', top: big ? '26%' : '12%', left: 0, right: 0, padding: `0 ${hasMascot ? 520 : 140}px 0 140px`,
       display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0 22px', fontFamily: FONT
     }}>
       {words.map((word, i) => {
         const entrance = spring({ frame: frame - i * 4, fps, config: { damping: 16, stiffness: 120 } });
         return (
           <span key={i} style={{
-            fontSize: big ? 112 : 76, fontWeight: 800, color: '#fff', lineHeight: 1.15,
+            fontSize: big ? (hasMascot ? 96 : 112) : 76, fontWeight: 800, color: '#fff', lineHeight: 1.15,
             textShadow: '0 4px 24px rgba(0,0,0,0.65)',
             opacity: entrance, transform: `translateY(${(1 - entrance) * 46}px) scale(${0.9 + entrance * 0.1})`
           }}>{word}</span>
@@ -94,9 +95,10 @@ const Scene = ({ scene, index, fadeFrames, durationFrames, hasMascot, lead }) =>
   );
   return (
     <AbsoluteFill style={{ opacity, background: 'linear-gradient(135deg, #1b1f3b 0%, #3a1c5c 100%)' }}>
-      {scene.image ? <KenBurns src={scene.image} duration={scene.duration} index={index} /> : null}
+      {scene.image ? <KenBurns src={scene.image} duration={scene.duration} index={index} /> : <Backdrop index={index} />}
+      {!scene.image && scene.visual ? <ProceduralVisual kind={scene.visual} dim={index === 0} /> : null}
       <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.05) 45%, rgba(0,0,0,0.6) 100%)' }} />
-      {scene.title ? <AnimatedTitle text={scene.title} index={index} /> : null}
+      {scene.title ? <AnimatedTitle text={scene.title} index={index} hasMascot={hasMascot} /> : null}
       <Captions words={scene.words} hasMascot={hasMascot} lead={lead} />
     </AbsoluteFill>
   );

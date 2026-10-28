@@ -1,6 +1,8 @@
 import React from 'react';
 import { Composition, registerRoot } from 'remotion';
 import { LumenVideo } from './LumenVideo.jsx';
+import { InfoVideo } from './InfoVideo.jsx';
+import { Thumbnail } from './Thumbnail.jsx';
 
 const FPS = 30;
 
@@ -16,8 +18,25 @@ const defaultProps = {
   ]
 };
 
+const infoDefaults = {
+  durationInSeconds: 6, audioFile: null, mascotFile: null, mouthEnvelope: [], phrases: [],
+  scenes: [{ start: 0, duration: 6, template: 'glass_ice', headline: 'Vì sao đá nổi?', subtitle: 'Trên mặt nước', mood: 'curious' }]
+};
+
 const Root = () => (
-  <Composition
+  <>
+    <Composition
+      id="InfoVideo"
+      component={InfoVideo}
+      fps={FPS}
+      width={1080}
+      height={1920}
+      durationInFrames={FPS * 6}
+      defaultProps={infoDefaults}
+      calculateMetadata={({ props }) => ({ durationInFrames: Math.max(1, Math.round(props.durationInSeconds * FPS)) })}
+    />
+    <Composition id="Thumbnail" component={Thumbnail} fps={FPS} width={1280} height={720} durationInFrames={1} defaultProps={{}} />
+    <Composition
     id="LumenVideo"
     component={LumenVideo}
     fps={FPS}
@@ -30,7 +49,8 @@ const Root = () => (
       width: props.width,
       height: props.height
     })}
-  />
+    />
+  </>
 );
 
 registerRoot(Root);

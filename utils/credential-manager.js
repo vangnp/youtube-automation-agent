@@ -52,6 +52,13 @@ const MEDIA_PROVIDERS = {
       fields: [
         { name: 'apiKey', label: 'API key', secret: true, env: 'GEMINI_API_KEY' },
         {
+          name: 'extraApiKeys',
+          label: 'Extra API keys (rotation)',
+          secret: true,
+          optional: true,
+          help: 'Optional, separated by commas. Text, image and narration move to the next key when one runs out of quota. Video always uses the main key.'
+        },
+        {
           name: 'ttsVoice',
           label: 'Voice',
           secret: false,
@@ -311,7 +318,9 @@ class CredentialManager {
       if (!apiKey && !this.credentials.gemini?.apiKey) {
         throw Object.assign(new Error('Gemini requires an API key'), { status: 400 });
       }
+      // Spread the stored entry: the TTS voice and rotation keys live beside the key.
       this.credentials.gemini = {
+        ...this.credentials.gemini,
         apiKey: apiKey || this.credentials.gemini.apiKey,
         model: String(input.model || '').trim() || GEMINI_DEFAULT_MODEL,
       };

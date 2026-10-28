@@ -4,6 +4,9 @@ module.exports = [
   {
     ignores: [
       'node_modules/**',
+      // Remotion project: ESM/JSX sources and the vendored whisper.cpp checkout
+      'remotion/**',
+      'data/projects/**',
       'coverage/**',
       'logs/**',
       'temp/**',

@@ -6,6 +6,8 @@ const { promisify } = require('util');
 const { getFFmpegPath } = require('./ffmpeg');
 const { narrationSegments } = require('./narration-script');
 const { contentLanguage } = require('./content-language');
+const { pickVisuals } = require('./scene-visuals');
+const { isWhisperReady, transcribeWords, alignScriptToSpeech } = require('./speech-aligner');
 
 const execFileAsync = promisify(execFile);
 
@@ -170,6 +172,14 @@ function alignToSpeech(plan, envelope, totalSeconds, fps = FPS) {
     })
   );
 
+  return buildSceneTiming(plan, timed, totalSeconds);
+}
+
+/**
+ * Turn per-word times (absolute seconds, one list per scene) into scene timing: each scene starts
+ * just before its first word is heard and lasts until the next scene's first word.
+ */
+function buildSceneTiming(plan, timed, totalSeconds) {
   const lead = 0.15;
   const starts = timed.map((words, index) => (index === 0 ? 0 : Math.max(0, words[0].start - lead)));
   return plan.map((scene, index) => {
@@ -188,25 +198,47 @@ function alignToSpeech(plan, envelope, totalSeconds, fps = FPS) {
   });
 }
 
+/**
+ * Timing from whisper: the script's words are matched to what whisper heard, so captions keep the
+ * script's exact text and the audio's exact timing. Returns null if too little matched.
+ */
+function alignWithWhisper(plan, recognised, totalSeconds) {
+  const sceneWords = plan.map(scene => plainText(scene.text).split(' ').filter(Boolean));
+  if (sceneWords.some(words => !words.length)) return null;
+  const result = alignScriptToSpeech(sceneWords.flat(), recognised, totalSeconds);
+  if (!result) return null;
+  let cursor = 0;
+  const timed = sceneWords.map(words => words.map(text => {
+    const { start, end } = result.words[cursor++];
+    return { text, start, end };
+  }));
+  return { scenes: buildSceneTiming(plan, timed, totalSeconds), share: result.share };
+}
+
 function buildRenderProps({
-  script, imageNames, audioName, mascotName = null, envelope = null, totalSeconds, width = 1920, height = 1080,
+  script, imageNames, audioName, mascotName = null, envelope = null, recognised = null, totalSeconds, width = 1920, height = 1080,
   language = contentLanguage()
 }) {
   const plan = buildScenePlan(script, language);
   if (!plan.length) throw new Error('The script has no scenes to render');
 
-  const aligned = alignToSpeech(plan, envelope, totalSeconds);
+  // Best to worst: whisper's word times, the narration's loudness, then a length-based estimate.
+  const heard = recognised ? alignWithWhisper(plan, recognised, totalSeconds) : null;
+  const aligned = heard ? heard.scenes : alignToSpeech(plan, envelope, totalSeconds);
+  const timing = heard ? 'whisper' : aligned ? 'envelope' : 'estimated';
+  // Scenes without a generated image get a code-drawn illustration chosen from what is being said.
+  const visuals = pickVisuals(plan.map(scene => `${scene.title} ${scene.text}`));
   let scenes;
   if (aligned) {
     scenes = aligned.map((scene, index) => ({
-      title: scene.title, body: scene.text, mood: scene.mood,
+      title: scene.title, body: scene.text, mood: scene.mood, visual: visuals[index],
       image: imageNames.length ? imageNames[index % imageNames.length] : null,
       start: scene.start, duration: scene.duration, words: scene.words
     }));
   } else {
     const durations = allocateDurations(plan, totalSeconds);
     scenes = plan.map((scene, index) => ({
-      title: scene.title, body: scene.text, mood: scene.mood,
+      title: scene.title, body: scene.text, mood: scene.mood, visual: visuals[index],
       image: imageNames.length ? imageNames[index % imageNames.length] : null,
       duration: durations[index], words: estimateWordTimings(scene.text, durations[index])
     }));
@@ -217,6 +249,7 @@ function buildRenderProps({
     mascotFile: mascotName || null,
     mouthEnvelope: envelope || [],
     aligned: Boolean(aligned),
+    timing,
     durationInSeconds: totalSeconds,
     scenes
   };
@@ -244,6 +277,7 @@ async function renderWithRemotion({ script, imagePaths = [], audioPath, outputPa
     }
     let audioName = null;
     let envelope = null;
+    let recognised = null;
     if (audioPath) {
       audioName = `narration${path.extname(audioPath).toLowerCase() || '.mp3'}`;
       await fs.copyFile(audioPath, path.join(publicDir, audioName));
@@ -251,6 +285,14 @@ async function renderWithRemotion({ script, imagePaths = [], audioPath, outputPa
         envelope = await computeSpeechEnvelope(audioPath);
       } catch (error) {
         logger.warn(`Could not analyse the narration, so lip-sync and captions use estimates: ${error.message}`);
+      }
+      if (isWhisperReady()) {
+        try {
+          logger.info('Transcribing the narration with whisper for word-accurate captions...');
+          recognised = await transcribeWords(audioPath, { language: contentLanguage().split('-')[0], workDir: jobDir });
+        } catch (error) {
+          logger.warn(`Whisper failed, so caption timing falls back to the audio loudness: ${error.message}`);
+        }
       }
     }
 
@@ -261,11 +303,11 @@ async function renderWithRemotion({ script, imagePaths = [], audioPath, outputPa
       await fs.copyFile(mascotFile, path.join(publicDir, mascotName));
     }
 
-    const props = buildRenderProps({ script, imageNames, audioName, mascotName, envelope, totalSeconds });
+    const props = buildRenderProps({ script, imageNames, audioName, mascotName, envelope, recognised, totalSeconds });
     const propsPath = path.join(jobDir, 'props.json');
     await fs.writeFile(propsPath, JSON.stringify(props), 'utf8');
 
-    logger.info(`Rendering ${props.scenes.length} scene(s) with Remotion (${props.durationInSeconds.toFixed(1)}s, ${props.aligned ? 'speech-aligned' : 'estimated'} timing)...`);
+    logger.info(`Rendering ${props.scenes.length} scene(s) with Remotion (${props.durationInSeconds.toFixed(1)}s, ${props.timing} timing)...`);
     const args = [
       'render', 'src/index.jsx', 'LumenVideo', path.resolve(outputPath),
       `--props=${propsPath}`, `--public-dir=${publicDir}`,
@@ -287,12 +329,47 @@ async function renderWithRemotion({ script, imagePaths = [], audioPath, outputPa
   }
 }
 
+/** Best available word timing for a plan: whisper, then loudness, then a length estimate. */
+function planTiming(plan, { recognised = null, envelope = null, totalSeconds }) {
+  const heard = recognised ? alignWithWhisper(plan, recognised, totalSeconds) : null;
+  if (heard) return { scenes: heard.scenes, timing: 'whisper', share: heard.share };
+  const byLoudness = alignToSpeech(plan, envelope, totalSeconds);
+  if (byLoudness) return { scenes: byLoudness, timing: 'envelope' };
+  const durations = allocateDurations(plan, totalSeconds);
+  let cursor = 0;
+  const scenes = plan.map((scene, index) => {
+    const start = Math.max(0, cursor - (index ? FADE_SECONDS : 0));
+    cursor = start + durations[index];
+    return { ...scene, start, duration: durations[index], words: estimateWordTimings(scene.text, durations[index]) };
+  });
+  return { scenes, timing: 'estimated' };
+}
+
+/** Run one Remotion render (video or still) with props from a JSON file; no shell involved. */
+async function renderComposition({ composition, outputPath, propsPath, publicDir, frame = null, extraArgs = [] }) {
+  if (!isRemotionInstalled()) throw new Error('Remotion is not installed. Run: npm run remotion:install');
+  const still = frame !== null;
+  const args = [still ? 'still' : 'render', 'src/index.jsx', composition, path.resolve(outputPath), '--log=error'];
+  if (propsPath) args.push(`--props=${path.resolve(propsPath)}`);
+  if (publicDir) args.push(`--public-dir=${path.resolve(publicDir)}`);
+  if (still) args.push(`--frame=${frame}`);
+  else args.push('--codec=h264', '--overwrite');
+  if (!still && process.env.REMOTION_CONCURRENCY) args.push(`--concurrency=${process.env.REMOTION_CONCURRENCY}`);
+  await execFileAsync(remotionBinary(), [...args, ...extraArgs], {
+    cwd: REMOTION_DIR, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.REMOTION_TIMEOUT_MS) || 30 * 60 * 1000
+  });
+  return outputPath;
+}
+
 module.exports = {
+  planTiming,
+  renderComposition,
   isRemotionEnabled,
   isRemotionInstalled,
   renderWithRemotion,
   computeSpeechEnvelope,
   alignToSpeech,
+  alignWithWhisper,
   buildScenePlan,
   buildRenderProps,
   estimateWordTimings,

@@ -5,9 +5,13 @@ const path = require('path');
 const axios = require('axios');
 const sharp = require('sharp');
 const { Logger } = require('./logger');
+const { collectGeminiKeys, createGeminiClient } = require('./gemini-keys');
 const { runFFmpeg, getMediaDuration, checkFFmpeg, ffmpegInstallHint } = require('./ffmpeg');
 const { MediaGenerationService } = require('./media-generation-service');
 const remotionRenderer = require('./remotion-renderer');
+
+const geminiTTSModel = () => process.env.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview';
+const geminiImageModel = () => process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 
 class AIVideoGenerator {
   constructor(credentials, options = {}) {
@@ -37,12 +41,10 @@ class AIVideoGenerator {
     }
 
     // Gemini media generation (images + native TTS) — free-tier alternative to OpenAI
-    const geminiKey = resolvedCredentials.gemini?.apiKey || process.env.GEMINI_API_KEY;
-    if (geminiKey) {
+    if (collectGeminiKeys(resolvedCredentials.gemini).length) {
       try {
-        const { GoogleGenAI } = require('@google/genai');
-        this.gemini = new GoogleGenAI({ apiKey: geminiKey });
-        this.logger.info('Gemini media service initialized (images + TTS)');
+        this.gemini = createGeminiClient(resolvedCredentials.gemini, this.logger);
+        this.logger.info(`Gemini media service initialized (images + TTS, ${this.gemini.size} key${this.gemini.size === 1 ? '' : 's'})`);
       } catch (error) {
         this.logger.warn('Failed to initialize Gemini media service:', error.message);
       }
@@ -83,7 +85,7 @@ class AIVideoGenerator {
         generatedPath = await this.generateOpenAITTS(text, outputPath);
       } else if (this.gemini) {
         provider = 'gemini';
-        model = process.env.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview';
+        model = geminiTTSModel();
         generatedPath = await this.generateGeminiTTS(text, outputPath);
       } else {
         generatedPath = await this.simulateTTSGeneration(text, outputPath);
@@ -166,7 +168,7 @@ class AIVideoGenerator {
   }
 
   async generateGeminiTTS(text, outputPath) {
-    const model = process.env.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview';
+    const model = geminiTTSModel();
     const voiceName = this.geminiTTSVoice;
 
     const response = await this.gemini.models.generateContent({
@@ -256,7 +258,7 @@ class AIVideoGenerator {
   }
 
   async generateGeminiImage(prompt, imagePath) {
-    const model = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+    const model = geminiImageModel();
 
     const response = await this.gemini.models.generateContent({
       model,
@@ -1015,4 +1017,4 @@ class AIVideoGenerator {
   }
 }
 
-module.exports = { AIVideoGenerator };
+module.exports = { AIVideoGenerator, geminiTTSModel, geminiImageModel };

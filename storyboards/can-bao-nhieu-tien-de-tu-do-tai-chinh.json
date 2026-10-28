@@ -1,0 +1,386 @@
+{
+  "slug": "can-bao-nhieu-tien-de-tu-do-tai-chinh",
+  "title": "Cần bao nhiêu tiền để tự do tài chính? Quy tắc 4% và số 25 | Yang Tò Mò",
+  "language": "vi",
+  "voice": "Achird",
+  "thumbnail": {
+    "title": "TỰ DO\nTÀI CHÍNH?",
+    "kicker": "QUY TẮC 4%",
+    "icon": "piggy"
+  },
+  "description": "Cần bao nhiêu tiền thì có thể thôi đi làm chỉ vì tiền? Yang giải thích công thức \"chi tiêu một năm nhân 25\", vì sao 25 bằng 100% chia cho 4%, quy tắc 4% đến từ đâu, vì sao tiền không cạn, ba rủi ro lớn, và mất bao lâu để đạt con số đó. Ví dụ tính bằng đồng Việt Nam. Nội dung chỉ mang tính giáo dục, không phải lời khuyên đầu tư.",
+  "tags": [
+    "Yang Tò Mò",
+    "tự do tài chính",
+    "quy tắc 4%",
+    "tiết kiệm tiền",
+    "đầu tư",
+    "tài chính cá nhân",
+    "FIRE",
+    "nghỉ hưu sớm"
+  ],
+  "scenes": [
+    {
+      "template": "big_question",
+      "mood": "curious",
+      "headline": "Bao nhiêu tiền là đủ?",
+      "subtitle": "Để tự do tài chính",
+      "labels": [],
+      "data": {
+        "icon": "piggy",
+        "text": "BẠN ĐÃ TỰ HỎI?",
+        "caption": "CẦN BAO NHIÊU TIỀN?"
+      },
+      "narration": "Xin chào, Yang đây! Phải có bao nhiêu tiền thì bạn mới có thể thôi đi làm chỉ vì tiền? Có một phép tính đơn giản để ước lượng. Hôm nay Yang giải thích vì sao nó hoạt động, và khi nào thì không."
+    },
+    {
+      "template": "formula",
+      "mood": "happy",
+      "headline": "Công thức 25 lần",
+      "subtitle": "Chỉ một phép nhân",
+      "labels": [],
+      "data": {
+        "items": [
+          {
+            "text": "Chi tiêu 1 năm",
+            "sub": "không phải thu nhập",
+            "icon": "wallet"
+          },
+          {
+            "text": "25",
+            "sub": "hệ số",
+            "icon": "calendar"
+          }
+        ],
+        "ops": [
+          "×",
+          "="
+        ],
+        "result": {
+          "text": "SỐ TỰ DO TÀI CHÍNH",
+          "sub": "số tiền cần có"
+        }
+      },
+      "narration": "Công thức là: số tiền tự do tài chính bằng chi tiêu một năm, nhân hai mươi lăm. Chú ý, là chi tiêu chứ không phải thu nhập. Hai người cùng kiếm năm mươi triệu một tháng, ai tiêu ít hơn thì cần ít tiền hơn."
+    },
+    {
+      "template": "steps",
+      "mood": "neutral",
+      "headline": "Tính thử",
+      "subtitle": "Với 15 triệu mỗi tháng",
+      "labels": [],
+      "data": {
+        "steps": [
+          {
+            "text": "15 triệu mỗi tháng",
+            "sub": "chi tiêu hiện tại"
+          },
+          {
+            "text": "× 12 = 180 triệu mỗi năm",
+            "sub": ""
+          },
+          {
+            "text": "× 25 = 4,5 tỷ đồng",
+            "sub": "số tiền cần có"
+          }
+        ]
+      },
+      "narration": "Ví dụ, mỗi tháng bạn tiêu mười lăm triệu đồng. Nhân mười hai tháng, ra một trăm tám mươi triệu đồng một năm. Nhân tiếp với hai mươi lăm, bạn được bốn phẩy năm tỷ đồng."
+    },
+    {
+      "template": "big_number",
+      "mood": "surprised",
+      "headline": "Con số cần có",
+      "subtitle": "Chi tiêu 15 triệu/tháng",
+      "labels": [],
+      "data": {
+        "icon": "coins",
+        "value": "4,5 tỷ",
+        "caption": "đồng",
+        "note": "180 TRIỆU × 25"
+      },
+      "narration": "bốn phẩy năm tỷ đồng nghe rất lớn. Nhưng đây không phải số tiền bạn tiêu hết dần, mà là vốn để sinh ra tiền mỗi năm. Vậy vì sao lại là hai mươi lăm lần?"
+    },
+    {
+      "template": "formula",
+      "mood": "curious",
+      "headline": "Vì sao là 25?",
+      "subtitle": "Vì 100% chia 4% bằng 25",
+      "labels": [],
+      "data": {
+        "items": [
+          {
+            "text": "100%",
+            "sub": "toàn bộ số tiền",
+            "icon": "coins"
+          },
+          {
+            "text": "4%",
+            "sub": "rút mỗi năm",
+            "icon": "target"
+          }
+        ],
+        "ops": [
+          "÷",
+          "="
+        ],
+        "result": {
+          "text": "25",
+          "sub": "năm chi tiêu"
+        }
+      },
+      "narration": "Con số hai mươi lăm đến từ quy tắc bốn phần trăm: mỗi năm bạn chỉ rút khoảng bốn phần trăm tổng số tiền đầu tư để sống. Lấy một trăm phần trăm chia cho bốn phần trăm, ra đúng hai mươi lăm. Nói cách khác, bốn phần trăm của số vốn đó vừa đủ trả chi tiêu một năm."
+    },
+    {
+      "template": "percent",
+      "mood": "happy",
+      "headline": "4% của 4,5 tỷ",
+      "subtitle": "Đúng bằng chi tiêu 1 năm",
+      "labels": [],
+      "data": {
+        "percent": 4,
+        "label": "Rút mỗi năm",
+        "restLabel": "Giữ lại đầu tư",
+        "caption": "mỗi năm"
+      },
+      "narration": "Thử lại: bốn phần trăm của bốn phẩy năm tỷ đồng là một trăm tám mươi triệu đồng, đúng bằng chi tiêu một năm. Phần còn lại, chín mươi sáu phần trăm, vẫn nằm trong danh mục đầu tư và tiếp tục sinh lời."
+    },
+    {
+      "template": "timeline",
+      "mood": "neutral",
+      "headline": "Con số 4% từ đâu ra?",
+      "subtitle": "Từ dữ liệu thị trường Mỹ",
+      "labels": [],
+      "data": {
+        "items": [
+          {
+            "label": "1926",
+            "text": "Dữ liệu cổ phiếu và trái phiếu Mỹ"
+          },
+          {
+            "label": "1998",
+            "text": "Nghiên cứu Trinity công bố kết quả"
+          },
+          {
+            "label": "30 năm",
+            "text": "Rút 4% hầu như đều đủ dùng"
+          }
+        ]
+      },
+      "narration": "Vậy bốn phần trăm từ đâu ra? Năm một nghìn chín trăm chín mươi tám, một nghiên cứu ở Mỹ, gọi là nghiên cứu Trinity, thử rút tiền từ danh mục cổ phiếu và trái phiếu, dựa trên dữ liệu thị trường Mỹ từ năm một nghìn chín trăm hai mươi sáu. Nếu rút bốn phần trăm năm đầu rồi tăng theo lạm phát, thì trong hầu hết các giai đoạn ba mươi năm, tiền vẫn chưa cạn."
+    },
+    {
+      "template": "bar_chart",
+      "mood": "neutral",
+      "headline": "Vì sao tiền không cạn?",
+      "subtitle": "Lãi sinh ra bù cho phần rút",
+      "labels": [],
+      "data": {
+        "title": "MỖI NĂM (VÍ DỤ)",
+        "items": [
+          {
+            "label": "Lãi 5%",
+            "value": 225,
+            "text": "225 triệu"
+          },
+          {
+            "label": "Rút 4%",
+            "value": 180,
+            "text": "180 triệu"
+          },
+          {
+            "label": "Còn dư",
+            "value": 45,
+            "text": "45 triệu"
+          }
+        ],
+        "note": "giả sử lãi thực 5% mỗi năm"
+      },
+      "narration": "Vì sao tiền không cạn? Giả sử danh mục sinh lời thực khoảng năm phần trăm mỗi năm, tức đã trừ lạm phát. Với bốn phẩy năm tỷ, lãi một năm là hai trăm hai mươi lăm triệu. Bạn rút một trăm tám mươi triệu để sống, vẫn dư bốn mươi lăm triệu."
+    },
+    {
+      "template": "list_points",
+      "mood": "surprised",
+      "headline": "Ba rủi ro lớn",
+      "subtitle": "Khiến 4% không chắc chắn",
+      "labels": [],
+      "data": {
+        "items": [
+          {
+            "text": "Thị trường giảm mạnh ngay những năm đầu",
+            "icon": "chart"
+          },
+          {
+            "text": "Lạm phát làm chi tiêu tăng dần",
+            "icon": "cart"
+          },
+          {
+            "text": "Sống lâu hơn 30 năm",
+            "icon": "clock"
+          }
+        ]
+      },
+      "narration": "Nhưng bốn phần trăm không phải lời hứa. Có ba rủi ro lớn: thị trường giảm mạnh ngay những năm đầu khi bạn đang rút tiền, lạm phát làm chi tiêu tăng dần, và nếu nghỉ hưu sớm thì tiền phải đủ dùng lâu hơn ba mươi năm."
+    },
+    {
+      "template": "bar_chart",
+      "mood": "happy",
+      "headline": "Muốn chắc hơn?",
+      "subtitle": "Rút ít đi, cần nhiều tiền hơn",
+      "labels": [],
+      "data": {
+        "title": "TỶ LỆ RÚT → SỐ TIỀN CẦN CÓ",
+        "items": [
+          {
+            "label": "4%",
+            "value": 25,
+            "text": "4,5 tỷ"
+          },
+          {
+            "label": "3,5%",
+            "value": 29,
+            "text": "5,1 tỷ"
+          },
+          {
+            "label": "3%",
+            "value": 33,
+            "text": "6 tỷ"
+          }
+        ],
+        "note": "với chi tiêu 180 triệu mỗi năm"
+      },
+      "narration": "Vì thế nhiều người chọn rút ít hơn cho chắc. Rút ba phẩy năm phần trăm thì cần khoảng hai mươi chín lần chi tiêu, tức năm phẩy một tỷ đồng. Rút ba phần trăm thì khoảng ba mươi ba lần, tức sáu tỷ đồng. Rút càng ít càng an toàn, nhưng phải tích lũy nhiều hơn."
+    },
+    {
+      "template": "note",
+      "mood": "neutral",
+      "headline": "Áp dụng ở Việt Nam",
+      "subtitle": "Cần thận trọng",
+      "labels": [],
+      "data": {
+        "icon": "globe",
+        "title": "LƯU Ý",
+        "items": [
+          "Con số 4% đến từ thị trường Mỹ",
+          "Lạm phát, lãi suất ở ta có thể khác",
+          "25 lần chỉ là mốc ước lượng"
+        ]
+      },
+      "narration": "Lưu ý quan trọng: con số bốn phần trăm đến từ dữ liệu thị trường Mỹ. Lạm phát, lãi suất ở Việt Nam có thể khác. Hãy xem hai mươi lăm lần là mốc ước lượng để lên kế hoạch, không phải một cam kết."
+    },
+    {
+      "template": "bar_chart",
+      "mood": "happy",
+      "headline": "Bao lâu thì đủ?",
+      "subtitle": "Phụ thuộc tỷ lệ tiết kiệm",
+      "labels": [],
+      "data": {
+        "title": "TỶ LỆ TIẾT KIỆM → SỐ NĂM",
+        "items": [
+          {
+            "label": "10%",
+            "value": 51,
+            "text": "51 năm"
+          },
+          {
+            "label": "25%",
+            "value": 32,
+            "text": "32 năm"
+          },
+          {
+            "label": "50%",
+            "value": 17,
+            "text": "17 năm"
+          },
+          {
+            "label": "70%",
+            "value": 9,
+            "text": "9 năm"
+          }
+        ],
+        "note": "giả sử lãi thực 5% mỗi năm, bắt đầu từ 0"
+      },
+      "narration": "Vậy mất bao lâu để đạt con số đó? Tùy vào tỷ lệ bạn để dành. Giả sử lãi thực năm phần trăm mỗi năm và bắt đầu từ con số không: để dành mười phần trăm thu nhập cần khoảng năm mươi mốt năm, hai mươi lăm phần trăm cần khoảng ba mươi hai năm, năm mươi phần trăm khoảng mười bảy năm, và bảy mươi phần trăm chỉ khoảng chín năm."
+    },
+    {
+      "template": "compare",
+      "mood": "surprised",
+      "headline": "Lợi ích kép",
+      "subtitle": "Cần ít hơn, để dành nhiều hơn",
+      "labels": [],
+      "data": {
+        "left": {
+          "title": "15 TRIỆU/THÁNG",
+          "icon": "wallet",
+          "points": [
+            "180 triệu mỗi năm",
+            "Cần 4,5 tỷ"
+          ]
+        },
+        "right": {
+          "title": "10 TRIỆU/THÁNG",
+          "icon": "piggy",
+          "points": [
+            "120 triệu mỗi năm",
+            "Cần 3 tỷ"
+          ]
+        }
+      },
+      "narration": "Điều thú vị là giảm chi tiêu có lợi kép. Giảm từ mười lăm triệu xuống mười triệu mỗi tháng, số cần có giảm từ bốn phẩy năm tỷ xuống còn ba tỷ, và bạn còn để dành được nhiều hơn mỗi tháng."
+    },
+    {
+      "template": "steps",
+      "mood": "happy",
+      "headline": "Ba bước bắt đầu",
+      "subtitle": "Ngay từ tháng này",
+      "labels": [],
+      "data": {
+        "steps": [
+          {
+            "text": "Ghi lại chi tiêu mỗi tháng",
+            "sub": ""
+          },
+          {
+            "text": "Nhân 12 rồi nhân 25",
+            "sub": "ra con số của bạn"
+          },
+          {
+            "text": "Để dành đều và đầu tư dài hạn",
+            "sub": ""
+          }
+        ]
+      },
+      "narration": "Vậy bắt đầu thế nào? Một, ghi lại chi tiêu thật trong vài tháng. Hai, nhân với mười hai rồi nhân với hai mươi lăm để biết mốc của bạn. Ba, để dành đều đặn, đầu tư dài hạn và giữ chi tiêu hợp lý."
+    },
+    {
+      "template": "note",
+      "mood": "neutral",
+      "headline": "Chỉ để tham khảo",
+      "subtitle": "Không phải lời khuyên",
+      "labels": [],
+      "data": {
+        "icon": "warning",
+        "title": "CHỈ ĐỂ THAM KHẢO",
+        "items": [
+          "Nội dung mang tính giáo dục",
+          "Không phải lời khuyên đầu tư",
+          "Hãy cân nhắc hoàn cảnh của bạn"
+        ]
+      },
+      "narration": "Video này chỉ mang tính giáo dục, không phải lời khuyên đầu tư. Hoàn cảnh mỗi người mỗi khác, hãy cân nhắc kỹ và hỏi người có chuyên môn."
+    },
+    {
+      "template": "outro_generic",
+      "mood": "wink",
+      "headline": "Hẹn gặp lại!",
+      "subtitle": "Yang Tò Mò",
+      "labels": [
+        "ĐĂNG KÝ KÊNH",
+        "THẢ TIM",
+        "BÌNH LUẬN SỐ CỦA BẠN"
+      ],
+      "data": {},
+      "narration": "Bạn đang tiêu bao nhiêu mỗi tháng? Hãy nhân thử với hai mươi lăm rồi bình luận cho Yang biết nhé. Nếu thấy hữu ích, hãy đăng ký kênh!"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "slug": "da-noi-tren-nuoc",
+  "title": "Vì sao đá nổi trên nước? | Yang Tò Mò",
+  "language": "vi",
+  "voice": "Achird",
+  "thumbnail": { "title": "ĐÁ NỔI\nTRÊN NƯỚC?", "kicker": "KHOA HỌC VUI" },
+  "description": "Vì sao viên đá lạnh nổi trên mặt nước trong khi hầu hết chất rắn đều chìm? Yang giải thích về khối lượng riêng, mạng lục giác rỗng của băng và vì sao cá vẫn sống sót dưới lớp băng mùa đông.",
+  "tags": ["Yang Tò Mò", "khoa học vui", "vì sao đá nổi", "khối lượng riêng", "nước đá", "khoa học cho trẻ em"],
+  "scenes": [
+    {
+      "template": "glass_ice", "mood": "curious",
+      "headline": "Vì sao đá nổi?", "subtitle": "Trên mặt nước",
+      "narration": "Bạn đã bao giờ thấy viên đá lạnh nổi lềnh bềnh trong ly nước chưa? Nghe thì quen thuộc, nhưng thật ra rất kỳ lạ, vì hầu hết các chất rắn đều chìm xuống trong chính chất lỏng của nó!"
+    },
+    {
+      "template": "density_balance", "mood": "happy",
+      "headline": "Nhẹ hơn thì nổi", "subtitle": "Khối lượng riêng",
+      "narration": "Bí mật nằm ở khối lượng riêng. Với cùng một thể tích, vật nào nhẹ hơn nước thì sẽ nổi. Nước lỏng nặng khoảng một gam trên mỗi xăng ti mét khối, còn nước đá chỉ khoảng không phẩy chín hai."
+    },
+    {
+      "template": "molecules", "mood": "surprised",
+      "headline": "Phân tử xếp thưa ra", "subtitle": "Khi nước đóng băng",
+      "narration": "Vì sao nước đá lại nhẹ hơn? Khi đóng băng, các phân tử nước liên kết với nhau thành một mạng lục giác rỗng. Giữa chúng có nhiều khoảng trống, nên chiếm nhiều chỗ hơn so với nước lỏng."
+    },
+    {
+      "template": "volume_expansion", "mood": "neutral",
+      "headline": "Thể tích tăng 9%", "subtitle": "Khi nước hóa đá",
+      "narration": "Vì vậy, khi nước hóa đá, thể tích tăng khoảng chín phần trăm, còn khối lượng thì không đổi. Cùng khối lượng mà thể tích lớn hơn, nên đá nhẹ hơn nước."
+    },
+    {
+      "template": "iceberg", "mood": "surprised",
+      "headline": "Phần lớn chìm dưới nước", "subtitle": "Chỉ lộ khoảng 9%",
+      "narration": "Cho nên viên đá nổi, nhưng phần lớn thân nó, khoảng chín mươi mốt phần trăm, vẫn nằm dưới mặt nước. Những tảng băng trôi ngoài đại dương cũng tương tự như vậy."
+    },
+    {
+      "template": "frozen_lake", "mood": "happy",
+      "headline": "Cá sống sót mùa đông", "subtitle": "Hồ đóng băng từ trên xuống",
+      "narration": "Nhờ vậy, vào mùa đông, ao hồ chỉ đóng băng ở trên mặt. Lớp băng như tấm chăn giữ cho nước bên dưới đủ ấm, nên cá và các sinh vật vẫn sống sót."
+    },
+    {
+      "template": "outro", "mood": "wink",
+      "headline": "Yang Tò Mò", "subtitle": "Tò mò một chút, hiểu biết nhiều hơn",
+      "narration": "Vậy là nước đá nổi vì nó nhẹ hơn nước, nhờ cấu trúc rỗng của băng. Bạn còn thắc mắc điều gì? Hãy để lại câu hỏi cho Yang, và đăng ký kênh nhé!"
+    }
+  ]
+}

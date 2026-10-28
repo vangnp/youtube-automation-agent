@@ -47,32 +47,46 @@ class ContentStrategyAgent {
     }
   }
 
+  // Most-popular charts for every configured region (YOUTUBE_REGION, comma separated) and, when
+  // YOUTUBE_TREND_CATEGORIES is set, only for those video categories (28 Science &
+  // Technology, 26 How-to). A region/category pair the API rejects is skipped, not fatal.
   async fetchYouTubeTrends() {
-    // Use YouTube API to fetch trending videos
     const youtube = this.credentials.getYouTubeClient();
-    
-    try {
-      const response = await youtube.videos.list({
-        part: 'snippet,statistics',
-        chart: 'mostPopular',
-        maxResults: 50,
-        regionCode: process.env.YOUTUBE_REGION || 'US'
-      });
+    const list = value => String(value || '').split(/[\s,;]+/).filter(Boolean);
+    const regions = list(process.env.YOUTUBE_REGION || 'US');
+    const categories = list(process.env.YOUTUBE_TREND_CATEGORIES);
+    const seen = new Map();
 
-      return response.data.items.map(video => ({
-        videoId: video.id,
-        title: video.snippet.title,
-        tags: video.snippet.tags || [],
-        viewCount: parseInt(video.statistics?.viewCount, 10) || 0,
-        category: video.snippet.categoryId,
-        publishedAt: video.snippet.publishedAt,
-        publisher: video.snippet.channelTitle || 'YouTube',
-        url: `https://www.youtube.com/watch?v=${video.id}`
-      }));
-    } catch (error) {
-      this.logger.error('Failed to fetch YouTube trends:', error);
-      return [];
+    for (const regionCode of regions) {
+      for (const categoryId of categories.length ? categories : [null]) {
+        try {
+          const response = await youtube.videos.list({
+            part: 'snippet,statistics',
+            chart: 'mostPopular',
+            maxResults: 50,
+            regionCode,
+            ...(categoryId ? { videoCategoryId: categoryId } : {})
+          });
+          for (const video of response.data.items || []) {
+            if (seen.has(video.id)) continue;
+            seen.set(video.id, {
+              videoId: video.id,
+              title: video.snippet.title,
+              tags: video.snippet.tags || [],
+              viewCount: parseInt(video.statistics?.viewCount, 10) || 0,
+              category: video.snippet.categoryId,
+              publishedAt: video.snippet.publishedAt,
+              publisher: video.snippet.channelTitle || 'YouTube',
+              region: regionCode,
+              url: `https://www.youtube.com/watch?v=${video.id}`
+            });
+          }
+        } catch (error) {
+          this.logger.warn(`Trending chart unavailable for ${regionCode}${categoryId ? `/category ${categoryId}` : ''}: ${error.message}`);
+        }
+      }
     }
+    return [...seen.values()];
   }
 
   async analyzeCompetitors() {
@@ -103,16 +117,17 @@ class ContentStrategyAgent {
     const youtube = this.credentials.getYouTubeClient();
     
     try {
-      const response = await youtube.search.list({
-        part: 'snippet',
-        channelId: channelId,
-        maxResults: 20,
-        order: 'date',
-        type: 'video'
+      // A channel's uploads playlist id is its channel id with the UC prefix swapped for UU. Reading it
+      // costs 1 quota unit, where search.list costs 100.
+      const response = await youtube.playlistItems.list({
+        part: 'contentDetails',
+        playlistId: `UU${String(channelId).slice(2)}`,
+        maxResults: 20
       });
 
-      const videoIds = response.data.items.map(item => item.id.videoId).join(',');
-      
+      const videoIds = response.data.items.map(item => item.contentDetails.videoId).join(',');
+      if (!videoIds) return [];
+
       const videoDetails = await youtube.videos.list({
         part: 'statistics,snippet',
         id: videoIds
@@ -168,11 +183,13 @@ class ContentStrategyAgent {
 
   extractKeywords(text) {
     // Simple keyword extraction
-    const stopWords = ['the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'could', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'will', 'just', 'should', 'now'];
+    const stopWords = ['the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'could', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'will', 'just', 'should', 'now',
+      // filler and clickbait words that carry no topic
+      'this', 'that', 'these', 'those', 'with', 'from', 'your', 'about', 'into', 'their', 'there', 'them', 'then', 'here', 'over', 'after', 'before', 'being', 'also', 'even', 'still', 'really', 'were', 'than', 'many', 'much', 'made', 'make', 'ever', 'never', 'always', 'shorts', 'short', 'video', 'videos', 'official', 'trailer', 'full', 'episode', 'insane', 'crazy', 'amazing', 'incredible', 'terrifying', 'ultimate', 'best', 'first', 'last', 'every', 'things', 'thing'];
     
     return text
       .toLowerCase()
-      .replace(/[^\w\s]/g, '')
+      .replace(/[^\p{L}\p{N}\s]/gu, '')
       .split(/\s+/)
       .filter(word => word.length > 3 && !stopWords.includes(word));
   }
@@ -353,7 +370,7 @@ Allowed source catalog: ${JSON.stringify(research.sourceCatalog)}
 Recent topics to avoid repeating: ${JSON.stringify(research.recentTopics)}
 Operator-approved performance learnings to apply: ${JSON.stringify(research.approvedLearnings)}
 
-Do not invent trend data, statistics, sources, URLs, or factual claims. Use only exact URLs from the supplied source catalog. Apply only the supplied approved learnings; pending or rejected recommendations are not authorized. Prefer evergreen topics when the supplied signals are weak. Learnings with category "audience_demand" are audience-requested topics mined from real comments on published videos; prefer planning a video that directly answers one when it fits the channel objective, and cite it in the rationale.`;
+Do not invent trend data, statistics, sources, URLs, or factual claims. Use only exact URLs from the supplied source catalog. Apply only the supplied approved learnings; pending or rejected recommendations are not authorized. Prefer evergreen topics when the supplied signals are weak. Research signals and the source catalog may come from videos in other languages and regions: treat them only as evidence of what people are curious about, then plan an original Vietnamese video on the underlying idea (Vietnamese topic and angle, examples and numbers relevant to Vietnamese viewers). Never plan a re-upload or a line-by-line translation of someone else's video. Ignore signals that are plain entertainment news, trailers, music videos, sports results or celebrity gossip unless the channel objective covers them. Learnings with category "audience_demand" are audience-requested topics mined from real comments on published videos; prefer planning a video that directly answers one when it fits the channel objective, and cite it in the rationale.`;
 
     try {
       const response = await this.aiTextService.generateText(prompt, { maxTokens: 1800, temperature: 0.65 });
