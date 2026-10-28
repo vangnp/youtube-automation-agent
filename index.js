@@ -21,11 +21,18 @@ const { AnonymousTelemetry } = require('./utils/anonymous-telemetry');
 const { ProductionReadinessService } = require('./utils/production-readiness-service');
 const { GenerationRecoveryService, GENERATION_STAGES } = require('./utils/generation-recovery-service');
 const { ProvenanceService } = require('./utils/provenance-service');
+const { findEvidence, attachScriptEvidence } = require('./utils/evidence-researcher');
+const { narrationSegments } = require('./utils/narration-script');
+const { contentLanguage } = require('./utils/content-language');
+const { lengthProfile } = require('./utils/video-length');
 const { SceneRepairService } = require('./utils/scene-repair-service');
 const { ShortsRepurposingService } = require('./utils/shorts-repurposing-service');
 const { AudienceEngagementService } = require('./utils/audience-engagement-service');
 const { GrowthExperimentService } = require('./utils/growth-experiment-service');
-const { AITextService, listOllamaModels } = require('./utils/ai-text-service');
+const { AITextService, listOllamaModels, GEMINI_MODELS, GEMINI_DEFAULT_MODEL } = require('./utils/ai-text-service');
+const { getUsageTracker, LIMIT_METRICS } = require('./utils/api-usage');
+const { listGeminiKeys } = require('./utils/gemini-keys');
+const { geminiTTSModel, geminiImageModel } = require('./utils/ai-video-generator');
 const { DiscoverabilityService } = require('./utils/discoverability-service');
 const { version } = require('./package.json');
 const chalk = require('chalk');
@@ -338,6 +345,37 @@ class YouTubeAutomationAgent {
   // unset API_KEY cannot be tolerated: another user on this machine can still
   // reach 127.0.0.1 and would otherwise be able to overwrite the operator's
   // provider with their own.
+  // The quota dashboard: Gemini usage per key and model, plus which other
+  // provider keys are stored, masked the same way as the settings page.
+  async describeApiUsage(keys) {
+    const text = this.credentials ? this.credentials.describeTextProvider() : { providers: [] };
+    const media = this.credentials ? this.credentials.describeMediaProviders() : { tts: [], video: [] };
+    const textModel = text.active === 'gemini' ? text.model || GEMINI_DEFAULT_MODEL : null;
+    const models = [
+      ...(textModel ? [{ model: textModel, roles: ['Scripts & SEO'] }] : []),
+      { model: geminiTTSModel(), roles: media.activeTTS === 'gemini' ? ['Narration'] : ['Narration (standby)'] },
+      { model: geminiImageModel(), roles: ['Images'] },
+      ...GEMINI_MODELS.filter(model => model !== textModel).map(model => ({ model, roles: ['Text (standby)'] })),
+    ];
+    const usage = await getUsageTracker().summarize({ keys, models });
+
+    const otherKeys = [
+      ...text.providers
+        .filter(provider => provider.id !== 'gemini' && provider.keyConfigured)
+        .map(provider => ({ kind: 'Text', name: provider.name, hint: provider.keyHint, active: text.active === provider.id })),
+      ...['tts', 'video'].flatMap(kind => (media[kind] || [])
+        .filter(provider => provider.id !== 'gemini' && provider.ready)
+        .map(provider => ({
+          kind: kind === 'tts' ? 'Narration' : 'Video',
+          name: provider.name,
+          hint: provider.fields.find(field => field.secret)?.hint || null,
+          fromEnvironment: provider.fields.some(field => field.fromEnvironment),
+          active: kind === 'tts' && media.activeTTS === provider.id,
+        }))),
+    ];
+    return { ...usage, otherKeys, textProvider: text.active, activeTTS: media.activeTTS || null };
+  }
+
   requireDashboardKey() {
     return (req, res, next) => {
       const configured = process.env.API_KEY;
@@ -455,6 +493,19 @@ class YouTubeAutomationAgent {
         }
         value.strategyContext[key] = body.strategyContext[key].trim();
       }
+      if (body.strategyContext.scriptApproval === true) value.strategyContext.scriptApproval = true;
+      if (Array.isArray(body.strategyContext.researchSources)) {
+        // Only well-formed http(s) sources survive, so the evidence desk never gets junk URLs.
+        value.strategyContext.researchSources = body.strategyContext.researchSources
+          .filter(source => source && typeof source.url === 'string' && /^https?:\/\//i.test(source.url))
+          .slice(0, 30)
+          .map(source => ({
+            url: source.url.slice(0, 2000),
+            title: String(source.title || '').slice(0, 300),
+            publisher: String(source.publisher || '').slice(0, 200),
+            sourceType: ['article', 'video', 'dataset', 'official', 'asset', 'other'].includes(source.sourceType) ? source.sourceType : 'other'
+          }));
+      }
     }
 
     return { valid: true, value };
@@ -528,6 +579,9 @@ class YouTubeAutomationAgent {
       monthlyBudget: optionalNumber('monthlyBudget', current.monthly_budget, 0, 10000000),
       outcomeCurrency,
       constraints: text('constraints', current.constraints, 2000),
+      scriptReview: body.scriptReview === undefined
+        ? current.script_review === undefined || current.script_review === null || Number(current.script_review) !== 0
+        : [true, 'true', 'on', 1, '1'].includes(body.scriptReview),
       status
     };
   }
@@ -571,8 +625,8 @@ class YouTubeAutomationAgent {
           return res.status(validation.status).json({ success: false, error: validation.error });
         }
 
-        const { topic, style, length } = validation.value;
-        const result = await this.startGenerationJob({ topic, style, length, source: 'manual' });
+        const { topic, style, length, strategyContext } = validation.value;
+        const result = await this.startGenerationJob({ topic, style, length, strategyContext, source: 'manual' });
         res.status(202).json({ success: true, result });
       } catch (error) {
         res.status(error.status || 500).json({ success: false, error: error.message });
@@ -706,6 +760,23 @@ class YouTubeAutomationAgent {
     this.app.post('/api/jobs/:jobId/resume', protect, async (req, res) => {
       try {
         const result = await this.resumeGenerationJob(req.params.jobId, { stage: req.body?.stage });
+        return res.status(202).json({ success: true, result });
+      } catch (error) {
+        return res.status(error.status || 400).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.get('/api/jobs/:jobId/script', protect, async (req, res) => {
+      try {
+        return res.json({ success: true, result: await this.getScriptForReview(req.params.jobId) });
+      } catch (error) {
+        return res.status(error.status || 400).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.post('/api/jobs/:jobId/script/review', protect, async (req, res) => {
+      try {
+        const result = await this.reviewScript(req.params.jobId, req.body || {});
         return res.status(202).json({ success: true, result });
       } catch (error) {
         return res.status(error.status || 400).json({ success: false, error: error.message });
@@ -1066,28 +1137,36 @@ class YouTubeAutomationAgent {
 
     this.app.put('/api/content/:productionId/provenance', protect, async (req, res) => {
       try {
-        const bundle = await this.db.getProductionBundle(req.params.productionId);
-        if (!bundle) return res.status(404).json({ error: 'Content not found' });
-        if (bundle.review_status === 'approved' || bundle.schedule) {
-          return res.status(409).json({ error: 'Provenance is locked after content is approved or scheduled' });
-        }
-        if (!this.provenance) this.provenance = new ProvenanceService(this.db);
-        await this.provenance.review(bundle.id, req.body || {});
-        const updated = await this.db.getProductionBundle(bundle.id);
-        const profile = await this.db.getChannelProfile() || {};
-        const quality = await this.operator.runQualityChecks({
-          ...updated,
-          scheduledPublishTime: updated.scheduled_publish_time
-        }, profile);
-        const reviewStatus = quality.passed ? 'needs_review' : 'needs_attention';
-        const result = await this.db.saveContentReview(bundle.id, {
-          status: reviewStatus,
-          editorData: updated.editorData,
-          qualityChecks: quality.checks,
-          reviewNotes: quality.passed ? null : `Blocking checks failed: ${quality.blockingFailures.join(', ')}`,
-          reviewedAt: null
+        const result = await this.reviseProvenance(req.params.productionId, (service, bundle) =>
+          service.review(bundle.id, req.body || {}));
+        return res.json({ success: true, result });
+      } catch (error) {
+        return res.status(error.status || 400).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.post('/api/content/:productionId/provenance/find-evidence', protect, async (req, res) => {
+      try {
+        const result = await this.reviseProvenance(req.params.productionId, async (service, bundle) => {
+          const open = (bundle.provenance?.claims || [])
+            .map((claim, index) => ({ text: claim.text, index, status: claim.status }))
+            .filter(claim => !['supported', 'waived'].includes(claim.status));
+          const found = await findEvidence(open, { aiTextService: this.agents.scriptWriter?.aiTextService });
+          found.links = found.links.map(link => ({ ...link, claimIndex: open[link.claimIndex].index }));
+          this.logger.info(`Evidence search matched ${new Set(found.links.map(link => link.claimIndex)).size} of ${open.length} open claims`);
+          return service.addFoundEvidence(bundle.id, found);
         });
-        return res.json({ success: true, result: this.decorateContentBundle(result) });
+        return res.json({ success: true, result });
+      } catch (error) {
+        return res.status(error.status || 400).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.post('/api/content/:productionId/provenance/confirm-evidence', protect, async (req, res) => {
+      try {
+        const result = await this.reviseProvenance(req.params.productionId, (service, bundle) =>
+          service.confirmFoundEvidence(bundle.id));
+        return res.json({ success: true, result });
       } catch (error) {
         return res.status(error.status || 400).json({ success: false, error: error.message });
       }
@@ -1459,6 +1538,55 @@ class YouTubeAutomationAgent {
       }
     });
 
+    // Gemini keys, what each spent in the current quota day, the limits Google
+    // reported, and when quotas reset. ?check=1 also verifies each key with
+    // Google, reusing a check from the last ten minutes.
+    this.app.get('/api/usage', protect, async (req, res) => {
+      try {
+        const keys = listGeminiKeys(this.credentials?.credentials?.gemini);
+        if (req.query.check === '1') await getUsageTracker().checkKeys(keys, { maxAgeMs: 10 * 60 * 1000 });
+        return res.json({ success: true, result: await this.describeApiUsage(keys) });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.post('/api/usage/check', protect, async (_req, res) => {
+      try {
+        const keys = listGeminiKeys(this.credentials?.credentials?.gemini);
+        await getUsageTracker().checkKeys(keys);
+        return res.json({ success: true, result: await this.describeApiUsage(keys) });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.put('/api/usage/limits', protect, async (req, res) => {
+      try {
+        const model = String(req.body?.model || '').trim();
+        if (!/^[\w.:/-]{1,100}$/.test(model)) return res.status(400).json({ success: false, error: 'model is not valid' });
+        const limits = {};
+        for (const metric of LIMIT_METRICS) {
+          if (!(metric in (req.body || {}))) continue;
+          const raw = req.body[metric];
+          if (raw === null || raw === '') {
+            limits[metric] = null;
+            continue;
+          }
+          const value = Number(raw);
+          if (!Number.isInteger(value) || value < 1 || value > 100000000) {
+            return res.status(400).json({ success: false, error: `${metric} must be a whole number from 1 to 100000000` });
+          }
+          limits[metric] = value;
+        }
+        await getUsageTracker().setManualLimits('gemini', model, limits);
+        const keys = listGeminiKeys(this.credentials?.credentials?.gemini);
+        return res.json({ success: true, result: await this.describeApiUsage(keys) });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     this.app.put('/api/settings', protect, async (req, res) => {
       const allowed = ['approval_required', 'notification_enabled', 'channel_timezone', 'max_daily_posts', 'content_buffer_days'];
       for (const key of allowed) {
@@ -1638,6 +1766,10 @@ class YouTubeAutomationAgent {
       await this.db.setSetting('last_content_generation', new Date().toISOString());
       return result;
     } catch (error) {
+      if (error.code === 'SCRIPT_APPROVAL_PENDING') {
+        this.logger.info(`Generation job ${jobId} is waiting for script approval`);
+        return null;
+      }
       const cancelled = error.code === 'JOB_CANCELLED';
       const current = await this.db.getGenerationJob(jobId);
       const failedStage = current?.stage || 'starting';
@@ -1668,6 +1800,213 @@ class YouTubeAutomationAgent {
       throw error;
     }
     await this.db.updateGenerationJob(jobId, { stage, progress, details });
+  }
+
+  // Runs a change to a production's evidence, then re-checks quality so the dashboard score stays true.
+  async reviseProvenance(productionId, change) {
+    const bundle = await this.db.getProductionBundle(productionId);
+    if (!bundle) {
+      const error = new Error('Content not found');
+      error.status = 404;
+      throw error;
+    }
+    if (bundle.review_status === 'approved' || bundle.schedule) {
+      const error = new Error('Provenance is locked after content is approved or scheduled');
+      error.status = 409;
+      throw error;
+    }
+    if (!this.provenance) this.provenance = new ProvenanceService(this.db);
+    await change(this.provenance, bundle);
+    const updated = await this.db.getProductionBundle(bundle.id);
+    const profile = await this.db.getChannelProfile() || {};
+    const quality = await this.operator.runQualityChecks({
+      ...updated,
+      scheduledPublishTime: updated.scheduled_publish_time
+    }, profile);
+    const result = await this.db.saveContentReview(bundle.id, {
+      status: quality.passed ? 'needs_review' : 'needs_attention',
+      editorData: updated.editorData,
+      qualityChecks: quality.checks,
+      reviewNotes: quality.passed ? null : `Blocking checks failed: ${quality.blockingFailures.join(', ')}`,
+      reviewedAt: null
+    });
+    return this.decorateContentBundle(result);
+  }
+
+  async attachScriptEvidence(script) {
+    try {
+      await attachScriptEvidence(script, { aiTextService: this.agents.scriptWriter?.aiTextService });
+    } catch (error) {
+      // Evidence is a help for the reviewer; failing to find it must never fail the video.
+      this.logger.warn(`Evidence search skipped: ${error.message}`);
+    }
+  }
+
+  // Stops a job after the script until the owner has read and approved it.
+  async holdForScriptApproval(jobId, strategyContext, script) {
+    if (!jobId || !strategyContext?.scriptApproval) return;
+    const job = await this.db.getGenerationJob(jobId);
+    if (job?.details?.scriptApproval?.status === 'approved') return;
+    await this.db.updateGenerationJob(jobId, {
+      status: 'awaiting_script_approval',
+      stage: 'script_review',
+      progress: 35,
+      title: script.title,
+      details: { scriptApproval: { status: 'pending', requestedAt: new Date().toISOString() } }
+    });
+    await this.operator.notify({
+      type: 'script_review_required',
+      level: 'info',
+      title: 'Script ready for your review',
+      message: `"${script.title}" is written. Read it, then approve it to make the video.`,
+      data: { jobId }
+    });
+    const error = new Error('Waiting for script approval');
+    error.code = 'SCRIPT_APPROVAL_PENDING';
+    throw error;
+  }
+
+  async scriptReviewJob(jobId) {
+    const job = await this.db.getGenerationJob(jobId);
+    if (!job) {
+      const error = new Error('Generation job not found');
+      error.status = 404;
+      throw error;
+    }
+    if (job.status !== 'awaiting_script_approval') {
+      const error = new Error('This job is not waiting for script approval');
+      error.status = 409;
+      throw error;
+    }
+    const checkpoint = await this.db.getGenerationCheckpoint(jobId, 'script');
+    if (!checkpoint?.artifact) {
+      const error = new Error('The saved script for this job is missing; regenerate it');
+      error.status = 409;
+      throw error;
+    }
+    return { job, script: checkpoint.artifact };
+  }
+
+  async getScriptForReview(jobId) {
+    const { job, script } = await this.scriptReviewJob(jobId);
+    const language = contentLanguage();
+    const segments = narrationSegments(script, language);
+    const words = segments.reduce((sum, segment) => sum + segment.text.split(/\s+/).filter(Boolean).length, 0);
+    const sourceByUrl = new Map((script.evidenceSources || []).map(source => [source.url, source]));
+    const profile = lengthProfile(job.length);
+    return {
+      jobId: job.id,
+      topic: job.topic,
+      requestedLength: profile.label,
+      targetWords: profile.words,
+      overTarget: words > profile.words[1],
+      reviewFeedback: job.details?.strategyContext?.reviewFeedback || null,
+      title: script.title,
+      hook: script.hook?.text || '',
+      sections: (script.mainContent?.sections || []).map(section => ({
+        title: section.title,
+        content: Array.isArray(section.content) ? section.content : [],
+        editable: Array.isArray(section.content)
+      })),
+      standardParts: segments.filter(segment => ['intro', 'conclusion', 'cta'].includes(segment.kind)),
+      claims: (script.claims || []).map(claim => ({
+        text: claim.text,
+        riskLevel: claim.riskLevel,
+        sources: (claim.sourceUrls || []).map(url => ({
+          url,
+          title: sourceByUrl.get(url)?.title || url,
+          excerpt: sourceByUrl.get(url)?.excerpt || ''
+        }))
+      })),
+      words,
+      estimatedMinutes: Math.round((words / 3.3 / 60) * 10) / 10
+    };
+  }
+
+  applyScriptEdits(script, edits = {}) {
+    const invalid = message => Object.assign(new Error(message), { status: 400 });
+    const clean = (value, max, label) => {
+      const text = String(value ?? '').replace(/[ \t]+/g, ' ').trim();
+      if (!text) throw invalid(`${label} cannot be empty`);
+      if (text.length > max) throw invalid(`${label} must be ${max} characters or less`);
+      return text;
+    };
+    const next = JSON.parse(JSON.stringify(script));
+    if (edits.title !== undefined) next.title = clean(edits.title, 100, 'Title');
+    if (edits.hook !== undefined) next.hook = { ...(next.hook || {}), text: clean(edits.hook, 600, 'Hook') };
+    if (edits.sections !== undefined) {
+      const sections = next.mainContent?.sections || [];
+      if (!Array.isArray(edits.sections) || edits.sections.length !== sections.length) {
+        throw invalid('Sections cannot be added or removed here; regenerate the script for a different structure');
+      }
+      next.mainContent.sections = sections.map((section, index) => {
+        const edit = edits.sections[index] || {};
+        const updated = { ...section };
+        if (edit.title !== undefined) updated.title = clean(edit.title, 150, `Section ${index + 1} title`);
+        if (edit.content !== undefined) {
+          if (!Array.isArray(section.content)) throw invalid(`Section ${index + 1} cannot be edited as text`);
+          const lines = (Array.isArray(edit.content) ? edit.content : String(edit.content).split(/\n+/))
+            .map(line => String(line).trim()).filter(Boolean);
+          if (!lines.length) throw invalid(`Section ${index + 1} needs at least one line`);
+          if (lines.some(line => line.length > 1500)) throw invalid(`Section ${index + 1} has a line over 1500 characters`);
+          updated.content = lines;
+        }
+        return updated;
+      });
+    }
+    next.fullScript = this.agents.scriptWriter.formatFullScript(next);
+    return next;
+  }
+
+  async reviewScript(jobId, body = {}) {
+    const action = String(body.action || '');
+    if (!['approve', 'regenerate', 'reject'].includes(action)) {
+      const error = new Error('action must be approve, regenerate, or reject');
+      error.status = 400;
+      throw error;
+    }
+    const { job, script } = await this.scriptReviewJob(jobId);
+
+    if (action === 'reject') {
+      return this.db.updateGenerationJob(job.id, {
+        status: 'cancelled',
+        error: null,
+        details: { scriptApproval: { status: 'rejected', decidedAt: new Date().toISOString() } },
+        completedAt: new Date().toISOString()
+      });
+    }
+
+    const maxConcurrent = Math.max(1, parseInt(process.env.MAX_CONCURRENT_JOBS || '1', 10));
+    if (this.activeJobs.has(job.id) || this.activeJobs.size >= maxConcurrent) {
+      const error = new Error(`Generation is busy (${this.activeJobs.size}/${maxConcurrent} active jobs). Try again when the current job finishes.`);
+      error.status = 429;
+      throw error;
+    }
+    const strategyContext = { ...(job.details?.strategyContext || {}) };
+    let resumeFrom;
+    let details;
+    if (action === 'approve') {
+      const edited = this.applyScriptEdits(script, body.edits || {});
+      const changed = JSON.stringify(edited) !== JSON.stringify(script);
+      if (changed) await this.db.saveGenerationCheckpoint(job.id, 'script', { artifact: edited });
+      resumeFrom = 'thumbnail';
+      details = { scriptApproval: { status: 'approved', decidedAt: new Date().toISOString(), edited: changed } };
+    } else {
+      const feedback = String(body.feedback || '').trim().slice(0, 1000);
+      if (feedback) strategyContext.reviewFeedback = feedback;
+      await this.db.deleteGenerationCheckpoints(job.id, GENERATION_STAGES.slice(GENERATION_STAGES.indexOf('script')));
+      resumeFrom = 'script';
+      details = { strategyContext, scriptApproval: { status: 'regenerating', decidedAt: new Date().toISOString() } };
+    }
+    const updated = await this.db.updateGenerationJob(job.id, {
+      status: 'queued', stage: resumeFrom, error: null, completedAt: null, details
+    });
+    const input = { topic: job.topic, style: job.style, length: job.length || 'medium', strategyContext };
+    const work = this.runGenerationJob(job.id, input)
+      .catch(error => this.logger.error(`Generation job ${job.id} failed after script review:`, error))
+      .finally(() => this.activeJobs.delete(job.id));
+    this.activeJobs.set(job.id, work);
+    return updated;
   }
 
   async generateContent(topic = null, style = null, length = 'medium', options = {}) {
@@ -1703,15 +2042,17 @@ class YouTubeAutomationAgent {
       return generated;
     });
     this.logger.info(`Strategy generated: ${strategy.topic}`);
+    // Set outside the strategy stage so a regenerated script sees it even when the strategy is reused.
+    strategy.reviewFeedback = strategyContext.reviewFeedback || null;
 
     // Step 2: Script Writing
-    const script = await this.runGenerationStage(
-      jobId,
-      'script',
-      25,
-      () => this.agents.scriptWriter.generateScript(strategy)
-    );
+    const script = await this.runGenerationStage(jobId, 'script', 25, async () => {
+      const written = await this.agents.scriptWriter.generateScript(strategy);
+      await this.attachScriptEvidence(written);
+      return written;
+    });
     this.logger.info(`Script generated: ${script.title}`);
+    await this.holdForScriptApproval(jobId, strategyContext, script);
 
     // Step 3: Thumbnail Design
     const thumbnail = await this.runGenerationStage(
@@ -2085,6 +2426,11 @@ class YouTubeAutomationAgent {
       console.log(chalk.green(`\n✅ YouTube Automation Agent running on ${HOST}:${PORT}`));
       console.log(chalk.gray('─'.repeat(50)));
       console.log(chalk.white('📊 Dashboard: ') + chalk.cyan(`http://${displayHost}:${PORT}`));
+      if (process.env.API_KEY) {
+        // Printed to this terminal only (not the log file): opening it once stores
+        // API_KEY in the browser. The fragment after # is never sent over the network.
+        console.log(chalk.white('🔑 Sign in once: ') + chalk.cyan(`http://${displayHost}:${PORT}/#key=${encodeURIComponent(process.env.API_KEY)}`));
+      }
       console.log(chalk.white('🔧 API Health: ') + chalk.cyan(`http://${displayHost}:${PORT}/health`));
       console.log(chalk.white('📅 Schedule: ') + chalk.cyan(`http://${displayHost}:${PORT}/schedule`));
       console.log(chalk.white('📈 Analytics: ') + chalk.cyan(`http://${displayHost}:${PORT}/analytics`));

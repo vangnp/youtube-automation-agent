@@ -92,12 +92,21 @@ class OperatorService {
     const provenance = production.provenance || {};
     const provenancePassed = ['verified', 'not_required'].includes(provenance.status || 'not_required');
     const unresolved = Number(provenance.summary?.unresolvedClaims || 0);
+    const openClaims = (provenance.claims || []).filter(claim => !['supported', 'waived'].includes(claim.status));
+    const withFoundSource = openClaims.filter(claim => (claim.sourceIds || []).length).length;
+    const withoutSource = openClaims.length - withFoundSource;
+    const details = withFoundSource || withoutSource
+      ? ` (${[
+        withFoundSource ? `${withFoundSource} with a source found automatically, waiting for your confirmation` : '',
+        withoutSource ? `${withoutSource} with no source yet` : ''
+      ].filter(Boolean).join('; ')})`
+      : '';
     checks.push(this.check('provenance', provenancePassed,
       provenance.status === 'verified'
         ? `${provenance.summary?.resolvedClaims || 0} factual claims resolved against reviewed evidence`
         : provenance.status === 'not_required'
           ? 'No externally verifiable factual claims were declared'
-          : `${unresolved} factual claim${unresolved === 1 ? '' : 's'} still require evidence review`));
+          : `${unresolved} factual claim${unresolved === 1 ? '' : 's'} still require evidence review${details}`));
 
     const discoverability = production.discoverability;
     if (discoverability) {

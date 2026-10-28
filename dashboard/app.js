@@ -24,10 +24,28 @@ function apiKey() {
   return localStorage.getItem('yaa_api_key') || '';
 }
 
-function requestApiKey() {
-  const key = prompt('Enter the API_KEY value from your .env. It stays in this browser only.', apiKey());
-  if (key !== null) localStorage.setItem('yaa_api_key', key.trim());
+// Set when the operator dismisses the key prompt, so the 8s poll does not
+// reopen it; the "Set dashboard API key" button asks again.
+let apiKeyPromptDismissed = false;
+
+// Accepts the whole .env line or a quoted value, since that is what gets copied.
+function normalizeApiKey(value) {
+  return String(value || '').trim().replace(/^API_KEY\s*=\s*/, '').replace(/^["']|["']$/g, '').trim();
+}
+
+function requestApiKey(message = 'Enter the API_KEY value from your .env. It stays in this browser only.') {
+  const key = prompt(message, apiKey());
+  apiKeyPromptDismissed = key === null;
+  if (key !== null) localStorage.setItem('yaa_api_key', normalizeApiKey(key));
   return key;
+}
+
+// The startup log prints a sign-in link carrying the key in the URL fragment,
+// which browsers never send to the server: store it and drop it from the address bar.
+const signInKey = location.hash.match(/^#key=(.+)$/);
+if (signInKey) {
+  localStorage.setItem('yaa_api_key', normalizeApiKey(decodeURIComponent(signInKey[1])));
+  window.history.replaceState(null, '', location.pathname);
 }
 
 async function api(url, options = {}, retry = true) {
@@ -40,11 +58,23 @@ async function api(url, options = {}, retry = true) {
       ...(options.headers || {})
     }
   });
-  if (response.status === 401 && retry && requestApiKey() !== null) return api(url, options, false);
+  if (response.status === 401 && retry) {
+    // Requests sent together all fail together: only the first one asks, the
+    // others retry with the key it stored.
+    if (apiKey() !== key) return api(url, options, false);
+    if (!apiKeyPromptDismissed) {
+      const rejected = key.startsWith('AIza')
+        ? 'That is a Gemini key. The dashboard needs the API_KEY value from your .env instead.'
+        : 'The stored API key was rejected. Enter the API_KEY value from your .env.';
+      const entered = requestApiKey(key ? rejected : undefined);
+      if (entered !== null) return api(url, options, false);
+    }
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(data.error || response.statusText || 'Request failed');
     error.data = data;
+    error.status = response.status;
     throw error;
   }
   return data;
@@ -112,7 +142,7 @@ function renderDashboard() {
   const state = ui.state;
   const reviews = state.pipeline.filter(item => ['needs_review', 'needs_attention'].includes(item.review_status));
   const scheduled = state.schedule.filter(item => item.status === 'scheduled');
-  const actionableJobs = state.jobs.filter(job => ['queued', 'running', 'failed', 'interrupted'].includes(job.status));
+  const actionableJobs = state.jobs.filter(job => ['queued', 'running', 'failed', 'interrupted', 'awaiting_script_approval'].includes(job.status));
 
   $('#brand-name').textContent = state.profile?.channel_name || 'Automation Studio';
   $('#setup-banner').classList.toggle('hidden', !state.system.setupRequired);
@@ -144,6 +174,7 @@ function renderDashboard() {
   renderActivation(state.activation);
   renderReadiness(state.readiness);
   renderOperator(state.channelStrategy, state.operatorRuns || [], { ...state.system, readiness: state.readiness });
+  renderScriptQueue(state.jobs);
   populateSettings(state.profile, state.settings, state.system.videoProviders || []);
 }
 
@@ -216,9 +247,83 @@ function renderJobs(jobs) {
         <div class="progress"><i style="width:${Math.max(0, Math.min(100, job.progress || 0))}%"></i></div>
       </div>
       ${['queued', 'running'].includes(job.status) ? `<button class="text-button" data-cancel-job="${escapeHTML(job.id)}">Cancel</button>` : ''}
+      ${job.status === 'awaiting_script_approval' ? `<button class="button secondary small" data-review-script="${escapeHTML(job.id)}">Review script</button>` : ''}
       ${recoverable ? `<div class="job-recovery"><select data-resume-stage-for="${escapeHTML(job.id)}" aria-label="Stage to resume from">${stages.map(stage => `<option value="${stage}" ${stage === resumeFrom ? 'selected' : ''}>${escapeHTML(label(stage))}</option>`).join('')}</select><button class="button secondary small" data-resume-job="${escapeHTML(job.id)}">Resume</button></div>` : ''}
     </article>`;
   }).join('');
+}
+
+function renderScriptQueue(jobs = []) {
+  const waiting = jobs.filter(job => job.status === 'awaiting_script_approval');
+  $('#operator-scripts').innerHTML = waiting.length ? waiting.map(job => `
+    <article class="plan-card">
+      <div class="meta-line">${statusChip(job.status)} · ${timeAgo(job.updated_at)}</div>
+      <strong>${escapeHTML(job.title || job.topic || 'Untitled script')}</strong>
+      <p>Read it, fix what you want, then approve it to make the video.</p>
+      <button class="button primary small" data-review-script="${escapeHTML(job.id)}">Review script</button>
+    </article>`).join('') : empty('No script is waiting. When Lumen writes one, it appears here before any video is made.');
+}
+
+function renderScriptClaims(claims = []) {
+  if (!claims.length) return '<p class="empty-inline">The script declares no factual claims.</p>';
+  return claims.map(claim => `
+    <article class="provenance-item ${claim.riskLevel === 'high' ? 'high-risk' : ''}">
+      <p>${escapeHTML(claim.text)}</p>
+      ${claim.sources.length ? claim.sources.map(source => `
+        <div class="evidence-found"><a class="source-link" href="${escapeHTML(source.url)}" target="_blank" rel="noopener">${escapeHTML(source.title)} ↗</a>
+        ${source.excerpt ? `<blockquote class="evidence-excerpt">${escapeHTML(source.excerpt)}</blockquote>` : ''}</div>`).join('')
+        : '<small class="evidence-missing">No source found yet. You can add one after the video is made.</small>'}
+    </article>`).join('');
+}
+
+async function openScriptReview(jobId) {
+  $('#loading').classList.add('active');
+  try {
+    const { result: review } = await api(`/api/jobs/${encodeURIComponent(jobId)}/script`);
+    $('#script-detail').innerHTML = `
+      <div class="dialog-heading"><div><p class="eyebrow">SCRIPT REVIEW</p><h2>${escapeHTML(review.title)}</h2>
+        <div class="meta-line">${review.words} words · about ${review.estimatedMinutes} min spoken · you asked for ${escapeHTML(review.requestedLength)} (${review.targetWords[0]}–${review.targetWords[1]} words)</div></div>
+        <button type="button" class="close-button" data-close>×</button></div>
+      <form id="script-review-form" class="editor" data-job-id="${escapeHTML(review.jobId)}">
+        ${review.overTarget ? '<p class="callout">This script is longer than the length you asked for. Lumen tries to fit the video to it, but trimming a section here is safer.</p>' : ''}
+        ${review.reviewFeedback ? `<p class="callout">Your last note was: ${escapeHTML(review.reviewFeedback)}</p>` : ''}
+        <label><span>Video title</span><input name="title" maxlength="100" value="${escapeHTML(review.title)}" required></label>
+        <label><span>Opening hook</span><textarea name="hook" rows="2" maxlength="600" required>${escapeHTML(review.hook)}</textarea></label>
+        ${review.sections.map((section, index) => `
+          <fieldset class="script-section" data-script-section="${index}">
+            <label><span>Section ${index + 1} title</span><input data-field="title" maxlength="150" value="${escapeHTML(section.title)}" required></label>
+            <label><span>What Yang says <small>one sentence per line</small></span><textarea data-field="content" rows="${Math.min(14, Math.max(4, section.content.length + 1))}" ${section.editable ? '' : 'disabled'}>${escapeHTML(section.content.join('\n'))}</textarea></label>
+          </fieldset>`).join('')}
+        ${review.standardParts.length ? `<details class="script-standard"><summary>Standard opening and closing lines</summary>${review.standardParts.map(part => `<p><strong>${escapeHTML(label(part.kind))}</strong> ${escapeHTML(part.text)}</p>`).join('')}</details>` : ''}
+        <section class="provenance-panel"><div class="panel-heading"><div><p class="eyebrow">EVIDENCE</p><h3>Facts this script relies on</h3><p>Sources were found automatically. You confirm them after the video is made.</p></div></div>
+          <div class="provenance-list">${renderScriptClaims(review.claims)}</div></section>
+        <label><span>Want a different draft? Tell Lumen what to change</span><textarea name="feedback" rows="2" maxlength="1000" placeholder="Explain the 25 times figure more slowly. Shorter intro."></textarea></label>
+        <div class="form-actions">
+          <button type="button" class="button primary" data-script-action="approve">Approve and make the video</button>
+          <button type="button" class="button secondary" data-script-action="regenerate">Write a new script</button>
+          <button type="button" class="text-button danger-text" data-script-action="reject">Reject</button>
+        </div>
+      </form>`;
+    $('#script-dialog').showModal();
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    $('#loading').classList.remove('active');
+  }
+}
+
+function scriptReviewEdits(form) {
+  return {
+    title: form.elements.title.value,
+    hook: form.elements.hook.value,
+    sections: [...form.querySelectorAll('[data-script-section]')].map(section => {
+      const content = section.querySelector('[data-field="content"]');
+      return {
+        title: section.querySelector('[data-field="title"]').value,
+        content: content.disabled ? undefined : content.value
+      };
+    })
+  };
 }
 
 function renderSchedule(schedule, selector) {
@@ -702,6 +807,9 @@ function renderOperator(strategy, runs, system) {
     if (form.elements[name] && document.activeElement !== form.elements[name]) form.elements[name].value = value ?? '';
   }
 
+  const reviewBox = form.elements.scriptReview;
+  if (reviewBox && document.activeElement !== reviewBox) reviewBox.checked = !strategy || Number(strategy.script_review ?? 1) !== 0;
+
   const strategyStatus = strategy?.status || 'not_configured';
   $('#operator-strategy-status').className = `status ${escapeHTML(strategyStatus)}`;
   $('#operator-strategy-status').textContent = label(strategyStatus);
@@ -792,11 +900,15 @@ function switchView(view) {
     analytics: ['PERFORMANCE', 'Turn results into the next move.'],
     engagement: ['AUDIENCE ENGAGEMENT', 'Talk with the people watching.'],
     readiness: ['PRODUCTION READINESS', 'Verify before autonomy runs.'],
+    quota: ['API KEYS & QUOTA', 'Know what every key has left.'],
     settings: ['CHANNEL GUARDRAILS', 'Make every agent sound like you.']
   };
   $('#view-eyebrow').textContent = titles[view][0];
   $('#view-title').textContent = titles[view][1];
   location.hash = view;
+  // quota.js loads after this file, so the initial hash route may arrive first;
+  // it then loads the view itself.
+  if (view === 'quota') window.loadQuota?.(true);
   // Provider state is fetched on demand rather than in the 8s dashboard poll,
   // which would otherwise reset the form while it is being edited.
   if (view === 'settings') {
@@ -812,8 +924,8 @@ function selectOptions(options, selected) {
 }
 
 function renderSourceEditor(source = {}, disabled = false) {
-  return `<article class="provenance-item" data-provenance-source data-id="${escapeHTML(source.id || '')}" data-published-at="${escapeHTML(source.publishedAt || '')}" data-accessed-at="${escapeHTML(source.accessedAt || '')}">
-    <div class="provenance-item-heading"><strong>Research source</strong><button type="button" class="text-button danger-text" data-remove-provenance ${disabled ? 'disabled' : ''}>Remove</button></div>
+  return `<article class="provenance-item" data-provenance-source data-id="${escapeHTML(source.id || '')}" data-published-at="${escapeHTML(source.publishedAt || '')}" data-accessed-at="${escapeHTML(source.accessedAt || '')}" data-origin="${escapeHTML(source.origin || 'manual')}" data-excerpt="${escapeHTML(source.excerpt || '')}">
+    <div class="provenance-item-heading"><strong>Research source${source.origin === 'ai_matched' ? ' · found automatically' : ''}</strong><button type="button" class="text-button danger-text" data-remove-provenance ${disabled ? 'disabled' : ''}>Remove</button></div>
     <label><span>URL</span><input data-field="url" type="url" value="${escapeHTML(source.url || '')}" placeholder="https://..." required ${disabled ? 'disabled' : ''}></label>
     <div class="form-grid two">
       <label><span>Title</span><input data-field="title" value="${escapeHTML(source.title || '')}" maxlength="300" ${disabled ? 'disabled' : ''}></label>
@@ -826,6 +938,7 @@ function renderSourceEditor(source = {}, disabled = false) {
       ], source.status || 'pending')}</select></label>
     </div>
     <label><span>Evidence notes</span><textarea data-field="notes" rows="2" maxlength="1000" ${disabled ? 'disabled' : ''}>${escapeHTML(source.notes || '')}</textarea></label>
+    ${source.excerpt ? `<blockquote class="evidence-excerpt">${escapeHTML(source.excerpt)}</blockquote>` : ''}
     ${source.url ? `<a class="source-link" href="${escapeHTML(source.url)}" target="_blank" rel="noopener">Open source ↗</a>` : ''}
   </article>`;
 }
@@ -859,7 +972,7 @@ function renderProvenanceEditor(provenance = {}, canReview = true) {
     <div class="panel-heading"><div><p class="eyebrow">RESEARCH &amp; PROVENANCE</p><h3>Evidence desk</h3><p>Verify sources, connect every factual claim, and record disclosure before approval.</p></div><span class="status ${provenance.status === 'verified' || provenance.status === 'not_required' ? 'success' : 'warning'}">${escapeHTML(statusLabel)}</span></div>
     <div class="provenance-toolbar"><strong>Sources</strong>${canReview ? '<button type="button" class="text-button" data-add-provenance-source>Add source +</button>' : ''}</div>
     <div id="provenance-sources" class="provenance-list">${sources.map(source => renderSourceEditor(source, !canReview)).join('') || '<p class="empty-inline">No research sources attached.</p>'}</div>
-    <div class="provenance-toolbar"><strong>Claims</strong>${canReview ? '<button type="button" class="text-button" data-add-provenance-claim>Add claim +</button>' : ''}</div>
+    <div class="provenance-toolbar"><strong>Claims</strong><span>${canReview && claims.some(claim => !['supported', 'waived'].includes(claim.status)) ? '<button type="button" class="text-button approve" data-find-evidence>Find evidence automatically</button>' : ''}${canReview && sources.some(source => source.origin === 'ai_matched' && source.status === 'pending') ? '<button type="button" class="text-button approve" data-confirm-evidence>Confirm found evidence</button>' : ''}${canReview ? '<button type="button" class="text-button" data-add-provenance-claim>Add claim +</button>' : ''}</span></div>
     <div id="provenance-claims" class="provenance-list">${claims.map(claim => renderClaimEditor(claim, sources, !canReview)).join('') || '<p class="empty-inline">No externally verifiable claims declared.</p>'}</div>
     <label class="toggle disclosure-toggle"><input id="contains-synthetic-media" type="checkbox" ${provenance.containsSyntheticMedia ? 'checked' : ''} ${canReview ? '' : 'disabled'}><span></span> Contains realistic altered or synthetic media requiring YouTube disclosure</label>
     ${canReview ? '<button type="button" class="button secondary" data-save-provenance>Save evidence review</button>' : ''}
@@ -1136,7 +1249,9 @@ function provenanceFormData() {
     status: item.querySelector('[data-field="status"]').value,
     notes: item.querySelector('[data-field="notes"]').value,
     publishedAt: item.dataset.publishedAt || null,
-    accessedAt: item.dataset.accessedAt || null
+    accessedAt: item.dataset.accessedAt || null,
+    origin: item.dataset.origin || 'manual',
+    excerpt: item.dataset.excerpt || ''
   }));
   const claims = $$('[data-provenance-claim]').map(item => ({
     id: item.dataset.id,
@@ -1215,6 +1330,59 @@ document.addEventListener('click', async event => {
   const cancel = event.target.closest('[data-cancel-job]');
   if (cancel && confirm('Cancel this generation job after its current stage?')) {
     await mutate(`/api/jobs/${encodeURIComponent(cancel.dataset.cancelJob)}/cancel`, 'POST', {}, 'Cancellation requested.').catch(() => {});
+  }
+
+  const reviewScript = event.target.closest('[data-review-script]');
+  if (reviewScript) return openScriptReview(reviewScript.dataset.reviewScript);
+
+  const scriptAction = event.target.closest('[data-script-action]');
+  if (scriptAction) {
+    const form = $('#script-review-form');
+    const jobId = form.dataset.jobId;
+    const action = scriptAction.dataset.scriptAction;
+    if (action === 'reject' && !confirm('Reject this script? No video will be made from it.')) return;
+    if (action === 'regenerate' && !form.reportValidity()) return;
+    if (action === 'approve' && !form.reportValidity()) return;
+    const messages = {
+      approve: 'Script approved. Lumen is making the video.',
+      regenerate: 'Writing a new script with your notes.',
+      reject: 'Script rejected.'
+    };
+    try {
+      await mutate(`/api/jobs/${encodeURIComponent(jobId)}/script/review`, 'POST', {
+        action,
+        edits: action === 'approve' ? scriptReviewEdits(form) : undefined,
+        feedback: action === 'regenerate' ? form.elements.feedback.value : undefined
+      }, messages[action]);
+      $('#script-dialog').close();
+    } catch (_error) { /* toast already shown */ }
+    return;
+  }
+
+  const findEvidenceButton = event.target.closest('[data-find-evidence]');
+  if (findEvidenceButton) {
+    const productionId = $('#content-review-form')?.dataset.productionId;
+    if (productionId) {
+      try {
+        await persistProvenance(productionId);
+        await mutate(`/api/content/${encodeURIComponent(productionId)}/provenance/find-evidence`, 'POST', {}, 'Evidence search finished. Read each excerpt before confirming.');
+        await refreshContentDialog(productionId);
+      } catch (_error) { /* toast already shown */ }
+    }
+    return;
+  }
+
+  const confirmEvidenceButton = event.target.closest('[data-confirm-evidence]');
+  if (confirmEvidenceButton) {
+    const productionId = $('#content-review-form')?.dataset.productionId;
+    if (productionId && confirm('Confirm that you read the excerpts and the pages support these claims?')) {
+      try {
+        await persistProvenance(productionId);
+        await mutate(`/api/content/${encodeURIComponent(productionId)}/provenance/confirm-evidence`, 'POST', {}, 'Evidence confirmed.');
+        await refreshContentDialog(productionId);
+      } catch (_error) { /* toast already shown */ }
+    }
+    return;
   }
 
   const idea = event.target.closest('[data-generate-idea]');
@@ -1677,6 +1845,7 @@ function strategyFormData(status = ui.state?.channelStrategy?.status || 'draft')
     targetValue: values.targetValue === '' ? null : Number(values.targetValue),
     targetWindowDays: Number(values.targetWindowDays),
     monthlyBudget: values.monthlyBudget === '' ? null : Number(values.monthlyBudget),
+    scriptReview: form.elements.scriptReview.checked,
     status
   };
 }
@@ -1713,7 +1882,12 @@ $('#generate-form').addEventListener('submit', async event => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget));
   try {
-    await mutate('/generate', 'POST', { ...values, topic: values.topic.trim() || null }, 'Generation job started.');
+    const { scriptApproval, ...rest } = values;
+    await mutate('/generate', 'POST', {
+      ...rest,
+      topic: values.topic.trim() || null,
+      strategyContext: scriptApproval ? { scriptApproval: true } : undefined
+    }, scriptApproval ? 'Script writing started. You will review it before the video is made.' : 'Generation job started.');
     $('#generate-dialog').close();
     event.currentTarget.reset();
   } catch (_error) { /* toast already shown */ }
@@ -1748,7 +1922,10 @@ $('#profile-form').addEventListener('submit', async event => {
 });
 
 $('#api-key-button').addEventListener('click', () => {
-  if (requestApiKey() !== null) showToast('Dashboard API key saved in this browser.');
+  if (requestApiKey() === null) return;
+  showToast('Dashboard API key saved in this browser.');
+  refreshDashboard(true);
+  if (ui.currentView === 'quota') window.loadQuota?.(true);
 });
 
 // ── AI text provider panel ───────────────────────────────────────────────────
@@ -2024,6 +2201,6 @@ $('#text-provider-form').addEventListener('submit', async event => {
 });
 
 const initialView = location.hash.slice(1);
-if (['overview', 'operator', 'pipeline', 'calendar', 'analytics', 'engagement', 'readiness', 'settings'].includes(initialView)) switchView(initialView);
+if (['overview', 'operator', 'pipeline', 'calendar', 'analytics', 'engagement', 'readiness', 'quota', 'settings'].includes(initialView)) switchView(initialView);
 refreshDashboard();
 setInterval(() => refreshDashboard(true), 8000);

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a script review step: the operator (and the Create video dialog) can stop after the script is written, show it for editing, and make the video only after approval; the switch is saved with the channel strategy and is on by default
+- Evidence is now searched automatically: factual claims get Wikipedia pages whose quoted sentence is checked verbatim, kept as pending until a person confirms them in the Evidence desk
+- Evidence search also reads established outlets (Reuters, AP, BBC, The Guardian, NYT, Nature and others, or your own list) through Google News; pages that block automated readers are kept as headline-only sources and flagged for the reviewer
+- Scripts greet the viewer once: the fixed Vietnamese intro says "Xin chào, Yang đây!" and the hook and sections no longer repeat it
+- Fixed research sources chosen by the operator being dropped before generation, which left every script with an empty evidence list
 - Bundled the DarkzSEO-compatible content audit so the preflight no longer depends on the unpublished 1.4 Python package; external 1.4+ checkouts remain opt-in through `DARKZSEO_PATH`
 - Fixed regenerated narration timing, CTA metadata and template-placeholder speech leaks, configured visual-style propagation, and null manual strategy contexts
 - Added explicit reschedule, publish-now, and delete-schedule controls while keeping generated content when a schedule is removed

@@ -38,6 +38,8 @@ class SystemTest {
       { name: 'Research and Provenance Desk', test: () => this.testProvenanceDesk() },
       { name: 'DarkzSEO Discoverability Preflight', test: () => this.testDiscoverabilityPreflight() },
       { name: 'Remotion Animated Renderer Planning', test: () => this.testRemotionPlanning() },
+      { name: 'Canvas Story Video Storyboard', test: () => this.testStoryVideoStoryboard() },
+      { name: 'Script Review and Found Evidence', test: () => this.testScriptReviewAndEvidence() },
       { name: 'Open Issue Regressions', test: () => this.testOpenIssueRegressions() },
       { name: 'Resumable Generation Checkpoints', test: () => this.testResumableGenerationCheckpoints() },
       { name: 'API Validation and Security', test: () => this.testAPIValidationAndSecurity() },
@@ -47,6 +49,7 @@ class SystemTest {
       { name: 'Placeholder Scheduling Guard', test: () => this.testPlaceholderSchedulingGuard() },
       { name: 'FFmpeg Resolution', test: () => this.testFFmpegResolution() },
       { name: 'Gemini Media Provider Selection', test: () => this.testGeminiMediaProvider() },
+      { name: 'Gemini Key Usage and Quota Tracking', test: () => this.testApiUsageTracking() },
       { name: 'Slideshow Duration Selection', test: () => this.testSlideshowDurationSelection() },
       { name: 'Slideshow Renderer', test: () => this.testSlideshowRenderer() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
@@ -440,6 +443,9 @@ class SystemTest {
         receivedInputs[0].strategyContext.researchSources.length !== 1
       ) {
         throw new Error('Autonomous operator did not execute the planned workflow');
+      }
+      if (!receivedInputs.every(input => input.strategyContext.scriptApproval === true)) {
+        throw new Error('The script review default must reach every autonomous job');
       }
 
       recoverableJob = await db.createGenerationJob({ topic: planned.plan[0].topic, source: 'autonomous_operator' });
@@ -2102,6 +2108,290 @@ class SystemTest {
     this.logger.info('Resumable generation checkpoints test completed successfully');
   }
 
+  async testScriptReviewAndEvidence() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { YouTubeAutomationAgent } = require('./index');
+    const { GenerationRecoveryService } = require('./utils/generation-recovery-service');
+    const { findEvidence, attachScriptEvidence } = require('./utils/evidence-researcher');
+    const { ProvenanceService } = require('./utils/provenance-service');
+    const { OperatorService } = require('./utils/operator-service');
+    const { AutonomousChannelOperator } = require('./utils/autonomous-channel-operator');
+
+    // Evidence search: a source is attached only when the quoted sentence really is in the page.
+    const page = {
+      title: 'AlphaFold',
+      url: 'https://en.wikipedia.org/wiki/AlphaFold',
+      extract: 'AlphaFold is an AI program developed by DeepMind. It predicts protein structure. Some call it a myth.',
+      publishedAt: null
+    };
+    const fakeAI = {
+      isAvailable: () => true,
+      generateText: async prompt => {
+        if (prompt.includes('Wikipedia article titles')) {
+          return '```json\n{"claims":[{"id":0,"titles":["AlphaFold","No Such Page"]},{"id":1,"titles":["AlphaFold"]},{"id":2,"titles":["AlphaFold"]}]}\n```';
+        }
+        if (prompt.includes('Does this sentence state the statement')) return '{"states":true}';
+        if (prompt.includes('Do these sentences')) return prompt.includes('Claim (may be in Vietnamese): AlphaFold was built') ? '{"entails":true}' : '{"entails":false}';
+        if (prompt.includes('CLAIM: AlphaFold was built')) return '{"statements":[{"statement":"x","found":true,"page":0,"quote":"AlphaFold is an AI program developed by DeepMind."}]}';
+        if (prompt.includes('CLAIM: AlphaFold was invented')) return '{"statements":[{"statement":"x","found":false,"page":null,"quote":""}]}';
+        return '{"statements":[{"statement":"x","found":true,"page":0,"quote":"AlphaFold won the Nobel Prize in 2024."}]}';
+      }
+    };
+    const found = await findEvidence([
+      { text: 'AlphaFold was built by DeepMind' },
+      { text: 'AlphaFold was invented in 1850' },
+      { text: 'AlphaFold won a prize' }
+    ], { aiTextService: fakeAI, fetchSummary: async title => (title === 'AlphaFold' ? page : null) });
+    if (found.links.length !== 1 || found.links[0].claimIndex !== 0 || found.sources.length !== 1) {
+      throw new Error(`Only a verbatim quote may become evidence, got ${JSON.stringify(found.links)}`);
+    }
+    if (found.sources[0].status !== 'pending' || found.sources[0].origin !== 'ai_matched' || !found.sources[0].excerpt.includes('DeepMind')) {
+      throw new Error('Found evidence must wait for a person to confirm it');
+    }
+    const looseMatch = await findEvidence([{ text: 'AlphaFold won a prize' }], {
+      aiTextService: {
+        isAvailable: () => true,
+        generateText: async prompt => prompt.includes('Wikipedia article titles') ? '{"claims":[{"id":0,"titles":["AlphaFold"]}]}'
+          : prompt.includes('Does this sentence state the statement') ? '{"states":true}'
+            : prompt.includes('Do these sentences') ? '{"entails":false}'
+              : '{"statements":[{"statement":"x","found":true,"page":0,"quote":"It predicts protein structure."}]}'
+      },
+      fetchSummary: async () => page
+    });
+    if (looseMatch.links.length) throw new Error('A quote that does not cover the whole claim must be dropped');
+    // Established outlets: the headline of a page the outlet blocks is kept, but flagged for the reviewer.
+    const newsPages = [
+      { title: 'DeepMind unveils AlphaFold', url: 'https://www.reuters.com/technology/deepmind-alphafold', extract: 'DeepMind unveils AlphaFold', publisher: 'Reuters', publishedAt: null, kind: 'news', headlineOnly: true },
+      { title: 'AlphaFold explained', url: 'https://www.bbc.com/news/alphafold', extract: 'AlphaFold explained\nAlphaFold is an AI program developed by DeepMind. Scientists use it widely.', publisher: 'BBC', publishedAt: null, kind: 'news', headlineOnly: false }
+    ];
+    const withNews = await findEvidence([{ text: 'AlphaFold was built by DeepMind' }], {
+      aiTextService: {
+        isAvailable: () => true,
+        generateText: async prompt => prompt.includes('Wikipedia article titles') ? '{"claims":[{"id":0,"titles":["AlphaFold"],"query":"AlphaFold DeepMind"}]}'
+          : prompt.includes('Does this sentence state the statement') ? '{"states":true}'
+            : prompt.includes('Do these sentences') ? '{"entails":true}'
+              : JSON.stringify({ statements: [{ statement: 'x', found: true, supports: [
+                { page: 0, quote: 'AlphaFold is an AI program developed by DeepMind.' },
+                { page: 2, quote: 'AlphaFold is an AI program developed by DeepMind.' },
+                { page: 1, quote: 'DeepMind unveils AlphaFold' }
+              ] }] })
+      },
+      fetchSummary: async () => page,
+      searchNewsPages: async query => { if (query !== 'AlphaFold DeepMind') throw new Error('wrong query'); return newsPages; }
+    });
+    const publishers = withNews.sources.map(source => source.publisher).sort().join();
+    if (publishers !== 'BBC,Reuters,Wikipedia') throw new Error(`An encyclopedia and two outlets may back one claim, got ${publishers}`);
+    const reuters = withNews.sources.find(source => source.publisher === 'Reuters');
+    if (!/headline/i.test(reuters.notes) || !reuters.url.startsWith('https://www.reuters.com/')) throw new Error('A headline-only outlet page must say that only the headline was read');
+    const quiet = await findEvidence([{ text: 'x' }], { aiTextService: { isAvailable: () => false } });
+    if (quiet.sources.length) throw new Error('Without an AI provider no evidence is invented');
+
+    const { findNewsPages, outletFor } = require('./utils/news-sources');
+    if (outletFor('https://www.reuters.com/world/x') !== 'Reuters' || outletFor('https://uk.reuters.com/y') !== 'Reuters' ||
+      outletFor('https://example-blog.com/reuters.com') !== null || outletFor('https://news.google.com/rss/articles/abc') !== null) {
+      throw new Error('Only real pages of an allowed outlet may count as news sources');
+    }
+    const searched = await findNewsPages('q', {
+      search: async () => [1, 2, 3, 4, 5, 6].map(n => ({ title: `Headline ${n}`, outlet: 'Reuters', link: `https://news.google.com/rss/articles/${n}`, publishedAt: null })),
+      resolve: async link => ({
+        1: 'https://news.google.com/x', 2: 'https://random-blog.com/post', 3: 'https://www.reuters.com/a', 4: 'https://www.reuters.com/b',
+        5: 'https://www.reuters.com/c', 6: 'https://www.bbc.com/d'
+      }[link.split('/').pop()]),
+      read: async url => (url.endsWith('/d') ? 'A readable paragraph. '.repeat(30) : null),
+      limit: 3
+    });
+    if (searched.map(item => item.url).join() !== 'https://www.reuters.com/a,https://www.reuters.com/b,https://www.bbc.com/d' ||
+      searched.filter(item => item.headlineOnly).length !== 2 || searched[2].headlineOnly) {
+      throw new Error(`News pages must skip redirects and unknown hosts and limit headline-only pages, got ${searched.map(item => item.url)}`);
+    }
+
+    // One greeting per script: the fixed intro says it, the AI hook and sections do not repeat it.
+    const { stripLeadingGreeting } = require('./utils/script-phrases');
+    const { ScriptWriterAgent } = require('./agents/script-writer-agent');
+    const writer = new ScriptWriterAgent({}, {});
+    const hook = writer.normalizeAIHook('Xin chào, Yang đây! Bạn có bao giờ tự hỏi vì sao trời xanh?');
+    const sections = writer.normalizeAISections([
+      { title: 'A', content: ['Xin chào, Yang đây!', 'Chào bạn! Ánh sáng đi theo sóng.', 'Màu xanh bị tán xạ nhiều nhất.'] }
+    ], { topic: 't' });
+    if (hook.text !== 'Bạn có bao giờ tự hỏi vì sao trời xanh?' || sections[0].content.join('|') !== 'Ánh sáng đi theo sóng.|Màu xanh bị tán xạ nhiều nhất.') {
+      throw new Error(`Greetings must be removed from the hook and the sections, got ${hook.text} / ${sections[0].content}`);
+    }
+    if (stripLeadingGreeting('Xin chào, Yang đây!') !== 'Xin chào, Yang đây!' ||
+      !require('./utils/script-phrases').phrases('vi').greeting.startsWith('Xin chào, Yang đây!')) {
+      throw new Error('A lone greeting is kept and the Vietnamese intro greets once');
+    }
+
+    const script = { claims: [{ text: 'AlphaFold was built by DeepMind', sourceUrls: [] }] };
+    await attachScriptEvidence(script, {
+      aiTextService: {
+        isAvailable: () => true,
+        generateText: async prompt => prompt.includes('Wikipedia article titles')
+          ? '{"claims":[{"id":0,"titles":["AlphaFold"]}]}'
+          : prompt.includes('Does this sentence state the statement') ? '{"states":true}'
+            : prompt.includes('Do these sentences') ? '{"entails":true}'
+              : '{"statements":[{"statement":"x","found":true,"page":0,"quote":"It predicts protein structure."}]}'
+      },
+      fetchSummary: async () => page
+    });
+    if (script.claims[0].sourceUrls[0] !== page.url || script.evidenceSources.length !== 1) {
+      throw new Error('Evidence must be written onto the script claim');
+    }
+
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-script-review-'));
+    const db = new Database();
+    db.dbPath = path.join(directory, 'review.db');
+    await db.initialize();
+    try {
+      // Provenance: found evidence is linked but unconfirmed until a person confirms it.
+      const provenance = new ProvenanceService(db);
+      const productionId = 'prod-evidence-test';
+      const saved = await provenance.initialize(productionId, { strategy: { researchSources: [] }, script });
+      if (saved.sources.length !== 1 || saved.claims[0].sourceIds.length !== 1 || saved.status !== 'blocked') {
+        throw new Error('Found evidence must be linked to its claim and still block approval');
+      }
+      const operator = new OperatorService(db);
+      const checks = await operator.runQualityChecks({ script: { fullScript: 'x'.repeat(300) }, provenance: saved }, {});
+      const message = checks.checks.find(check => check.id === 'provenance').message;
+      if (!/waiting for your confirmation/.test(message)) throw new Error(`The check must say a source was found, got: ${message}`);
+      const confirmed = await provenance.confirmFoundEvidence(productionId);
+      if (confirmed.status !== 'verified' || confirmed.claims[0].status !== 'supported' || confirmed.sources[0].status !== 'verified') {
+        throw new Error('Confirming found evidence must resolve the claim');
+      }
+      let nothing = false;
+      try { await provenance.confirmFoundEvidence(productionId); } catch (_error) { nothing = true; }
+      if (!nothing) throw new Error('Confirming with nothing to confirm must be rejected');
+      const reload = await provenance.review(productionId, { sources: confirmed.sources, claims: confirmed.claims });
+      if (reload.sources[0].origin !== 'ai_matched' || !reload.sources[0].excerpt) throw new Error('Saving the evidence desk must keep origin and excerpt');
+
+      // The generate request keeps sources and the review switch, and drops junk URLs.
+      const agent = new YouTubeAutomationAgent();
+      agent.db = db;
+      const validation = agent.validateGenerateRequestBody({
+        topic: 'x',
+        strategyContext: { scriptApproval: true, researchSources: [{ url: 'https://example.com/a', title: 'A' }, { url: 'javascript:alert(1)' }, { title: 'no url' }] }
+      });
+      if (!validation.valid || validation.value.strategyContext.scriptApproval !== true ||
+        validation.value.strategyContext.researchSources.length !== 1) {
+        throw new Error('Research sources and the review switch must survive request validation');
+      }
+      if (agent.validateChannelStrategy({ objective: 'o', audience: 'a', contentPillars: ['p'] }).scriptReview !== true ||
+        agent.validateChannelStrategy({ objective: 'o', audience: 'a', contentPillars: ['p'], scriptReview: false }).scriptReview !== false) {
+        throw new Error('Script review must default to on and be switchable off');
+      }
+
+      // The gate: write the script, stop, edit, approve; or regenerate with feedback; or reject.
+      const thumbnailPath = path.join(directory, 'thumbnail.jpg');
+      const videoPath = path.join(directory, 'video.mp4');
+      await fs.writeFile(thumbnailPath, Buffer.from('thumbnail'));
+      await fs.writeFile(videoPath, Buffer.from('video'));
+      const strategy = { topic: 'Reviewed script', contentType: 'Explainer', requestedStyle: 'explainer', requestedLengthKey: 'short' };
+      const feedbackSeen = [];
+      let scriptCalls = 0;
+      let productionScriptTitle = null;
+      const makeScript = () => ({
+        title: `Draft ${++scriptCalls}`,
+        hook: { text: 'Hook line.', duration: '0:00-0:05' },
+        introduction: { greeting: 'Hi', topicIntro: 'Intro', valueProposition: 'Value', credibility: 'Cred', duration: '0:05-0:20' },
+        mainContent: { sections: [{ title: 'Why', content: ['First line.', 'Second line.'], duration: 60 }] },
+        conclusion: { recap: ['Recap'], finalThought: 'Done' },
+        callToAction: { subscribe: 'Subscribe', like: 'Like', comment: 'Comment' },
+        claims: [],
+        fullScript: 'A script long enough to count as present for the checkpoint validation.'
+      });
+      agent.recovery = new GenerationRecoveryService(db, { logger: agent.logger, baseDelayMs: 0, updateJobStage: (...args) => agent.updateJobStage(...args) });
+      agent.readiness = { assertReady: async () => true };
+      agent.operator = {
+        runQualityChecks: async () => ({ passed: true, score: 100, checks: [{ passed: true }], blockingFailures: [] }),
+        notify: async () => null
+      };
+      let productionCalls = 0;
+      agent.agents = {
+        strategy: { generateContentStrategy: async () => ({ ...strategy }) },
+        scriptWriter: {
+          generateScript: async received => { feedbackSeen.push(received.reviewFeedback); return makeScript(); },
+          formatFullScript: scriptValue => `TITLE: ${scriptValue.title}`
+        },
+        thumbnailDesigner: { generateThumbnail: async () => ({ path: thumbnailPath, concept: {} }) },
+        seoOptimizer: { optimize: async scriptValue => ({ title: scriptValue.title, description: 'A complete description.', tags: ['a'] }) },
+        production: {
+          processContent: async input => {
+            productionCalls++;
+            productionScriptTitle = input.script.title;
+            return {
+              id: `review-production-${productionCalls}`, status: 'ready', ...input,
+              assets: { finalVideo: { path: videoPath, simulated: false }, thumbnail: { path: thumbnailPath } },
+              timeline: {}, scheduledPublishTime: new Date(Date.now() + 86400000).toISOString(), priority: 50, estimatedDuration: '2:00'
+            };
+          }
+        },
+        publishing: { scheduleContent: async () => null }
+      };
+
+      const started = await agent.startGenerationJob({
+        topic: strategy.topic, style: 'explainer', length: 'short', source: 'manual', strategyContext: { scriptApproval: true }
+      });
+      const waiting = await agent.waitForGenerationJob(started.id);
+      if (waiting.status !== 'awaiting_script_approval' || waiting.stage !== 'script_review' || productionCalls !== 0) {
+        throw new Error(`The job must stop after the script, got ${waiting.status}/${waiting.stage} with ${productionCalls} productions`);
+      }
+      const review = await agent.getScriptForReview(started.id);
+      if (review.title !== 'Draft 1' || review.sections.length !== 1 || !review.standardParts.length || review.words < 5) {
+        throw new Error('The script review must show the spoken script');
+      }
+      let rejectedEdit = false;
+      try { await agent.reviewScript(started.id, { action: 'approve', edits: { sections: [] } }); } catch (_error) { rejectedEdit = true; }
+      if (!rejectedEdit) throw new Error('Edits that change the section structure must be rejected');
+      await agent.reviewScript(started.id, {
+        action: 'approve',
+        edits: { title: 'Edited by the owner', sections: [{ title: 'Why it works', content: 'Line one.\nLine two.\nLine three.' }] }
+      });
+      await agent.waitForGenerationJob(started.id);
+      const finished = await db.getGenerationJob(started.id);
+      if (finished.status !== 'completed' || productionCalls !== 1 || scriptCalls !== 1 || productionScriptTitle !== 'Edited by the owner') {
+        throw new Error(`Approval must continue with the edited script, got ${finished.status}, scripts ${scriptCalls}, title ${productionScriptTitle}`);
+      }
+      const reused = await db.getGenerationCheckpoint(started.id, 'script');
+      if (reused.artifact.mainContent.sections[0].content.length !== 3) throw new Error('Edited lines must be saved with the job');
+      let notWaiting = false;
+      try { await agent.getScriptForReview(started.id); } catch (error) { notWaiting = error.status === 409; }
+      if (!notWaiting) throw new Error('A finished job must not offer a script review');
+
+      const second = await agent.startGenerationJob({ topic: strategy.topic, style: 'explainer', length: 'short', source: 'manual', strategyContext: { scriptApproval: true } });
+      await agent.waitForGenerationJob(second.id);
+      await agent.reviewScript(second.id, { action: 'regenerate', feedback: 'Explain it more slowly' });
+      const again = await agent.waitForGenerationJob(second.id);
+      if (again.status !== 'awaiting_script_approval' || !feedbackSeen.includes('Explain it more slowly') || scriptCalls !== 3) {
+        throw new Error(`Regenerating must write a new script with the feedback and wait again, got ${again.status}, ${scriptCalls} scripts`);
+      }
+      await agent.reviewScript(second.id, { action: 'reject' });
+      const rejected = await db.getGenerationJob(second.id);
+      if (rejected.status !== 'cancelled' || productionCalls !== 1) throw new Error('A rejected script must not become a video');
+
+      // The operator treats a waiting script as progress, not as a failure.
+      const third = await agent.startGenerationJob({ topic: strategy.topic, style: 'explainer', length: 'short', source: 'manual', strategyContext: { scriptApproval: true } });
+      await agent.waitForGenerationJob(third.id);
+      await db.saveChannelStrategy({ objective: 'o', audience: 'a', contentPillars: ['p'], status: 'active' });
+      const channel = await db.getChannelStrategy();
+      const fakeOperator = new AutonomousChannelOperator(db, {
+        researchAndPlan: async () => ({ research: { sources: [] }, plan: [{ topic: strategy.topic, angle: 'a', format: 'explainer', length: 'short', rationale: 'r', sourceUrls: [] }] }),
+        startGenerationJob: async () => third,
+        waitForGenerationJob: async jobId => db.getGenerationJob(jobId),
+        resumeGenerationJob: async () => third
+      });
+      const run = await fakeOperator.start(channel);
+      await fakeOperator.activeRuns.get(run.id);
+      const ended = await db.getOperatorRun(run.id);
+      if (ended.status !== 'waiting_review' || ended.stage !== 'waiting_for_script_review' || ended.summary.awaitingScript !== 1 || ended.summary.failed !== 0) {
+        throw new Error(`A script waiting for approval must not count as failed, got ${ended.status}/${ended.stage} ${JSON.stringify(ended.summary)}`);
+      }
+    } finally {
+      await db.close();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+    this.logger.info('Script review and found evidence test completed successfully');
+  }
+
   async testAPIValidationAndSecurity() {
     const { YouTubeAutomationAgent } = require('./index');
     const agent = new YouTubeAutomationAgent();
@@ -2599,6 +2889,93 @@ class SystemTest {
     }
 
     this.logger.info(`FFmpeg resolution test completed (binary: ${ffmpegPath}, available: ${available})`);
+  }
+
+  async testApiUsageTracking() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { ApiUsageTracker, fingerprintKey, parseQuotaError, quotaDayStart, nextQuotaReset } = require('./utils/api-usage');
+    const { GeminiKeyPool, listGeminiKeys } = require('./utils/gemini-keys');
+
+    // Daily quotas reset at midnight Pacific, across daylight-saving changes too.
+    const summerStart = quotaDayStart(new Date('2026-07-15T20:00:00Z'));
+    if (summerStart.toISOString() !== '2026-07-15T07:00:00.000Z') throw new Error(`PDT quota day must start at 07:00 UTC, got ${summerStart.toISOString()}`);
+    const winterReset = nextQuotaReset(new Date('2026-12-01T03:00:00Z'));
+    if (winterReset.toISOString() !== '2026-12-01T08:00:00.000Z') throw new Error(`PST reset must be 08:00 UTC, got ${winterReset.toISOString()}`);
+    const fallBackReset = nextQuotaReset(new Date('2026-11-01T12:00:00Z'));
+    if (fallBackReset.toISOString() !== '2026-11-02T08:00:00.000Z') throw new Error(`Reset after the fall-back day is wrong: ${fallBackReset.toISOString()}`);
+
+    const quotaBody = {
+      error: {
+        code: 429,
+        status: 'RESOURCE_EXHAUSTED',
+        message: 'You exceeded your current quota.',
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', quotaValue: '20', quotaDimensions: { model: 'gemini-test' } }] },
+          { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '31s' }
+        ]
+      }
+    };
+    const quotaError = Object.assign(new Error(JSON.stringify(quotaBody)), { status: 429 });
+    const parsed = parseQuotaError(quotaError);
+    if (parsed.metric !== 'rpd' || parsed.limit !== 20 || parsed.retryAfterMs !== 31000) {
+      throw new Error(`429 details were not parsed: ${JSON.stringify(parsed)}`);
+    }
+
+    const savedEnv = { GEMINI_API_KEY: process.env.GEMINI_API_KEY, GEMINI_API_KEYS: process.env.GEMINI_API_KEYS };
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEYS;
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-api-usage-'));
+    try {
+      const keys = listGeminiKeys({ apiKey: 'AIzaFirstKey0000000000000001', extraApiKeys: 'AIzaSecondKey000000000000002, AIzaFirstKey0000000000000001' });
+      if (keys.length !== 2 || keys[1].source !== 'rotation') throw new Error('Rotation keys must be listed once with their source');
+
+      const tracker = new ApiUsageTracker({
+        dbPath: path.join(directory, 'usage.db'),
+        logger: { warn() {} },
+        probe: async key => ({ status: key.endsWith('1') ? 'valid' : 'invalid', latencyMs: 5, checkedAt: new Date().toISOString(), message: 'test' })
+      });
+      // The first key is out of daily quota; the pool must move on and both attempts must be recorded.
+      const clients = {
+        AIzaFirstKey0000000000000001: { models: { generateContent: async () => { throw quotaError; } } },
+        AIzaSecondKey000000000000002: { models: { generateContent: async () => ({ text: 'ok', usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 10, totalTokenCount: 50 } }) } }
+      };
+      const pool = new GeminiKeyPool(keys.map(entry => entry.key), key => clients[key], { warn() {} }, tracker);
+      await pool.models.generateContent({ model: 'gemini-test', contents: 'hi' });
+      await tracker.flush();
+      await tracker.checkKeys(keys);
+      await tracker.setManualLimits('gemini', 'gemini-test', { rpm: 5 });
+
+      const summary = await tracker.summarize({ keys, models: [{ model: 'gemini-test', roles: ['Scripts & SEO'] }] });
+      if (JSON.stringify(summary).includes('AIzaFirstKey') || JSON.stringify(summary).includes('AIzaSecondKey')) {
+        throw new Error('The usage summary must never contain a full API key');
+      }
+      const [first, second] = summary.keys;
+      if (first.id !== fingerprintKey(keys[0].key).id || first.status !== 'limited' || first.today.rateLimited !== 1) {
+        throw new Error(`The exhausted key must show as limited: ${JSON.stringify(first)}`);
+      }
+      if (first.blocked[0]?.until !== summary.quotaDay.resetsAt) throw new Error('A daily-quota block must last until the Pacific reset');
+      if (second.status !== 'invalid' || second.today.requests !== 1 || second.today.tokens !== 50) {
+        throw new Error(`The second key must count its call and report the failed live check: ${JSON.stringify(second)}`);
+      }
+      const secondCell = summary.cells.find(cell => cell.keyId === second.id);
+      if (secondCell.limits.rpd?.source !== 'google_other_key' || secondCell.limits.rpm?.value !== 5 || secondCell.limits.rpm.source !== 'manual') {
+        throw new Error(`Limits must come from Google or the operator: ${JSON.stringify(secondCell.limits)}`);
+      }
+      if (summary.models[0].poolDailyCapacity !== 40 || summary.models[0].keysAvailable !== 1) {
+        throw new Error(`Pool capacity is wrong: ${JSON.stringify(summary.models[0])}`);
+      }
+      if (summary.hourly.reduce((sum, hour) => sum + hour.requests + hour.rateLimited, 0) !== 2) {
+        throw new Error('Both attempts must appear in the hourly chart');
+      }
+      tracker.db.close();
+    } finally {
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   }
 
   async testGeminiMediaProvider() {
@@ -3851,10 +4228,119 @@ class SystemTest {
     if (!spoken.includes('Phần 1: S') || spoken.includes('[note]') || spoken.includes('Section')) {
       throw new Error('Narration must use the channel language labels and skip bracketed placeholders');
     }
+    const { phrases } = require('./utils/script-phrases');
+    if (!/Yang/.test(phrases('vi').greeting) || /\b(the|and|video)\b/i.test(phrases('vi').recap('x').join(' '))) {
+      throw new Error('Vietnamese boilerplate must not contain English text');
+    }
+    if (phrases('en').conclusionTitle !== 'Wrapping Up' || phrases('fr').conclusionTitle !== 'Wrapping Up') {
+      throw new Error('English stays the default phrase set');
+    }
+    // Whisper alignment: a misheard word ("Giang" for "Yang") must not break the words around it.
+    const { alignScriptToSpeech } = require('./utils/speech-aligner');
+    const heard = [['Xin', 0, 0.4], ['chào', 0.4, 0.8], ['Giang', 0.8, 1.3], ['đây', 1.3, 1.7], ['hôm', 2.5, 2.8], ['nay', 2.8, 3.2]]
+      .map(([text, start, end]) => ({ text, start, end }));
+    const matched = alignScriptToSpeech(['Xin', 'chào,', 'Yang', 'đây!', 'Hôm', 'nay'], heard, 4);
+    if (!matched || matched.words.length !== 6) throw new Error('Whisper alignment must return one timing per script word');
+    if (Math.abs(matched.words[4].start - 2.5) > 0.01 || matched.words[2].start < 0.79 || matched.words[2].end > 1.31) {
+      throw new Error('Words must take the time they were spoken, including a misheard word between its neighbours');
+    }
+    if (alignScriptToSpeech(['một', 'hai', 'ba', 'bốn'], [{ text: 'khác', start: 0, end: 1 }], 4) !== null) {
+      throw new Error('Unrelated speech must not be trusted for timing');
+    }
+    const { pickVisuals } = require('./utils/scene-visuals');
+    const visuals = pickVisuals(['Vì sao đá nổi trên nước', 'Phân tử nước xếp thưa ra', 'Đá bọt từ núi lửa', 'Xin chào', 'Xin chào']);
+    if (visuals[1] !== 'molecule' || visuals[2] !== 'pumice') throw new Error(`Scene visuals must follow the topic, got ${visuals}`);
+    if (visuals[3] === visuals[4]) throw new Error('The same illustration must not repeat on consecutive scenes');
     if (narrationSegments({ title: 'T' }).length !== 0) throw new Error('An empty script has nothing to narrate');
     if (buildRenderProps({ script: { title: 'T', hook: { text: 'x' } }, imageNames: [], totalSeconds: 5 }).scenes[0].image !== null) {
       throw new Error('A scene without images must render without a background image');
     }
+  }
+
+  async testStoryVideoStoryboard() {
+    const fs = require('fs');
+    const { spellOutVietnameseNumbers: spell } = require('./utils/vi-numbers');
+    const expectSpelled = (input, output) => {
+      if (spell(input) !== output) throw new Error(`"${input}" must be read "${output}", got "${spell(input)}"`);
+    };
+    expectSpelled('4,5 tỷ', 'bốn phẩy năm tỷ');
+    expectSpelled('25% số tiền', 'hai mươi lăm phần trăm số tiền');
+    expectSpelled('150.000 đồng', 'một trăm năm mươi nghìn đồng');
+    expectSpelled('1005', 'một nghìn không trăm linh năm');
+    expectSpelled('21 và 15', 'hai mươi mốt và mười lăm');
+    expectSpelled('0,92', 'không phẩy chín hai');
+    expectSpelled('180 triệu × 25 = 4,5 tỷ', 'một trăm tám mươi triệu nhân hai mươi lăm bằng bốn phẩy năm tỷ');
+
+    // The template and icon lists the renderer draws must match what a storyboard may name.
+    const templates = require('./utils/story-templates');
+    const genericSource = fs.readFileSync(path.join(__dirname, 'remotion', 'src', 'canvas-generic.js'), 'utf8');
+    const genericBlock = genericSource.slice(genericSource.indexOf('export const GENERIC_TEMPLATES'));
+    const drawn = [...genericBlock.matchAll(/^\s+(\w+): \(ctx, args\)/gm)].map(match => match[1]).sort();
+    if (drawn.join() !== [...templates.GENERIC_TEMPLATES].sort().join()) {
+      throw new Error(`Generic templates drifted: renderer ${drawn} vs schema ${templates.GENERIC_TEMPLATES}`);
+    }
+    const iconSource = fs.readFileSync(path.join(__dirname, 'remotion', 'src', 'canvas-icons.js'), 'utf8');
+    const iconBlock = iconSource.slice(iconSource.indexOf('export const ICONS'), iconSource.indexOf('export const ICON_NAMES'));
+    const icons = [...iconBlock.matchAll(/^ {2}(\w+)\(ctx/gm)].map(match => match[1]).sort();
+    if (icons.join() !== [...templates.ICONS].sort().join()) {
+      throw new Error(`Icons drifted: renderer ${icons} vs schema ${templates.ICONS}`);
+    }
+
+    const { alignScriptToSpeech } = require('./utils/speech-aligner');
+    const heardDigits = [{ text: 'Năm', start: 0, end: 0.4 }, { text: '1998', start: 0.4, end: 1.6 }, { text: '4', start: 1.6, end: 2 }, { text: 'phần', start: 2, end: 2.3 }, { text: 'trăm.', start: 2.3, end: 2.7 }];
+    const spelledScript = 'năm một nghìn chín trăm chín mươi tám bốn phần trăm'.split(' ');
+    const aligned = alignScriptToSpeech(spelledScript, heardDigits, 3);
+    if (!aligned || aligned.share < 0.9) throw new Error('Numbers heard as digits must still match a script that spells them out');
+    if (aligned.words[1].start < 0.39 || aligned.words[7].end > 1.61) throw new Error('The words of a spelled-out number must share the time it was spoken');
+    if (templates.pickIcon('Tiết kiệm tiền để mua nhà') !== 'piggy' || templates.pickIcon('Hố đen và vũ trụ') !== 'rocket') {
+      throw new Error('Icons must follow the topic');
+    }
+    if (templates.slugify('Vì sao đá nổi trên nước? | Yang') !== 'vi-sao-da-noi-tren-nuoc-yang') throw new Error('Slugs must be plain lowercase ASCII');
+
+    const { storyboard, warnings } = templates.sanitizeStoryboard({
+      title: 'Cần bao nhiêu tiền?',
+      scenes: [
+        { template: 'big_question', headline: 'Bao nhiêu tiền mới đủ để tự do tài chính?', narration: 'Xin chào, Yang đây! Bạn cần bao nhiêu tiền?', data: { icon: 'not-an-icon', text: 'bạn có biết?' } },
+        { template: 'formula', headline: 'Công thức', narration: 'Chào bạn lần nữa! Chi tiêu 180 triệu nhân 25 ra 4,5 tỷ.', data: { items: [{ text: 'Chi tiêu năm' }], result: { text: '4,5 tỷ' } } },
+        { template: 'bar_chart', headline: 'Tiết kiệm', narration: 'Để dành 50% mất 17 năm.', data: { items: [{ label: '50%', value: 17 }, { label: '70%', value: 9 }, { label: 'x', value: -3 }] } },
+        { template: 'does_not_exist', headline: '', narration: '   ' }
+      ]
+    }, { language: 'vi' });
+    if (storyboard.scenes.length !== 4) throw new Error(`An empty scene is dropped and an outro added, got ${storyboard.scenes.length} scenes`);
+    if (storyboard.scenes[0].data.icon === 'not-an-icon' || storyboard.scenes[0].data.text !== 'BẠN CÓ BIẾT?') throw new Error('An unknown icon must be replaced by one matching the topic');
+    if (storyboard.scenes[0].headline.length > 28) throw new Error('Headlines must fit the header card');
+    if (/Chào bạn/.test(storyboard.scenes[1].narration)) throw new Error('Only the first scene may greet the viewer');
+    if (storyboard.scenes[1].template !== 'icon_scene') throw new Error('A formula without enough data must fall back to an icon scene');
+    if (/\d/.test(storyboard.scenes.map(scene => scene.narration).join(' '))) throw new Error('Vietnamese narration must not contain digits');
+    if (storyboard.scenes[2].data.items.length !== 2) throw new Error('A bar with a non-positive value must be dropped');
+    if (storyboard.scenes[3].template !== 'outro_generic' || !warnings.length) throw new Error('A closing call-to-action scene must be added when missing');
+    let rejected = false;
+    try { templates.sanitizeStoryboard({ scenes: [{ narration: 'one' }] }); } catch (_error) { rejected = true; }
+    if (!rejected) throw new Error('A storyboard with fewer than three scenes must be rejected');
+
+    const { writeStoryboard } = require('./utils/storyboard-writer');
+    const script = {
+      title: 'Vì sao đá nổi?',
+      hook: { text: 'Bạn có biết đá nổi trên nước không?' },
+      mainContent: { sections: [
+        { title: 'Khối lượng riêng', content: ['Nước đá nhẹ hơn nước lỏng.', 'Vì thế đá nổi.'] },
+        { title: 'Cấu trúc băng', content: ['Phân tử xếp thưa ra.', 'Có nhiều khoảng trống.'] }
+      ] },
+      keywords: ['đá', 'nước']
+    };
+    const answer = '```json\n' + JSON.stringify({ title: 'Vì sao đá nổi?', scenes: [
+      { template: 'big_question', narration: 'Vì sao đá nổi?', data: {} },
+      { template: 'percent', headline: 'Phần nổi', narration: 'Chỉ 9% nổi lên.', data: { percent: 9 } },
+      { template: 'steps', headline: 'Các bước', narration: 'Hai bước.', data: { steps: ['một', 'hai'] } },
+      { template: 'outro_generic', headline: 'Hết', narration: 'Đăng ký kênh nhé.' }
+    ] }) + '\n```';
+    const ai = await writeStoryboard({ script, language: 'vi', aiTextService: { isAvailable: () => true, generateText: async () => answer } });
+    if (ai.source !== 'ai' || ai.storyboard.scenes.length !== 4) throw new Error('A fenced JSON answer from the model must be parsed');
+    const broken = await writeStoryboard({ script, language: 'vi', aiTextService: { isAvailable: () => true, generateText: async () => 'sorry, no' } });
+    if (broken.source !== 'fallback' || broken.storyboard.scenes.length < 3) throw new Error('An unusable model answer must fall back to a plain storyboard');
+    const offline = await writeStoryboard({ script, language: 'vi' });
+    const last = offline.storyboard.scenes[offline.storyboard.scenes.length - 1];
+    if (offline.source !== 'fallback' || last.template !== 'outro_generic') throw new Error('Without a model the storyboard comes from the script and ends with a call to action');
   }
 
 }

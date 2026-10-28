@@ -2,6 +2,7 @@ const crypto = require('crypto');
 
 const SOURCE_TYPES = new Set(['article', 'video', 'dataset', 'official', 'asset', 'other']);
 const SOURCE_STATUSES = new Set(['pending', 'verified', 'rejected']);
+const SOURCE_ORIGINS = new Set(['manual', 'ai_matched']);
 const CLAIM_RISKS = new Set(['standard', 'high']);
 const CLAIM_STATUSES = new Set(['pending', 'supported', 'unsupported', 'waived']);
 
@@ -14,12 +15,57 @@ class ProvenanceService {
     const existing = await this.db.getContentProvenance(productionId);
     if (existing) return existing;
 
-    const sources = this.normalizeSources(production.strategy?.researchSources || []);
+    const sources = this.normalizeSources(this.mergeSources(
+      production.strategy?.researchSources || [],
+      production.script?.evidenceSources || []
+    ));
     const sourceIdByUrl = new Map(sources.map(source => [source.url, source.id]));
     const claims = this.normalizeClaims(production.script?.claims || [], sources, sourceIdByUrl);
     const provenance = this.build({ sources, claims, containsSyntheticMedia: production.containsSyntheticMedia === true });
     await this.db.saveContentProvenance(productionId, provenance);
     return this.db.getContentProvenance(productionId);
+  }
+
+  // The same page can arrive from the trend research and from the evidence search; keep the first copy.
+  mergeSources(...lists) {
+    const seen = new Set();
+    return lists.flat().filter(item => {
+      const url = this.validUrl(item?.url);
+      if (!url || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+  }
+
+  // Adds evidence found automatically. It stays "pending": a person still reads it and confirms it.
+  async addFoundEvidence(productionId, found = {}) {
+    const existing = await this.db.getContentProvenance(productionId) || {};
+    const sources = this.normalizeSources(this.mergeSources(existing.sources || [], found.sources || []));
+    const idByUrl = new Map(sources.map(source => [source.url, source.id]));
+    const claims = (existing.claims || []).map(claim => ({ ...claim, sourceIds: [...(claim.sourceIds || [])] }));
+    for (const link of found.links || []) {
+      const claim = claims[link.claimIndex];
+      const id = idByUrl.get(this.validUrl(link.url));
+      if (claim && id && !claim.sourceIds.includes(id)) claim.sourceIds.push(id);
+    }
+    return this.review(productionId, { sources, claims });
+  }
+
+  // The reviewer has read the excerpts: matched sources become verified and the claims they back become supported.
+  async confirmFoundEvidence(productionId) {
+    const existing = await this.db.getContentProvenance(productionId) || {};
+    const confirmed = new Set();
+    const sources = (existing.sources || []).map(source => {
+      if (source.origin !== 'ai_matched' || source.status !== 'pending') return source;
+      confirmed.add(source.id);
+      return { ...source, status: 'verified' };
+    });
+    const claims = (existing.claims || []).map(claim => {
+      if (claim.status !== 'pending' || !(claim.sourceIds || []).some(id => confirmed.has(id))) return claim;
+      return { ...claim, status: 'supported' };
+    });
+    if (!confirmed.size) throw this.invalid('There is no automatically found evidence waiting for confirmation');
+    return this.review(productionId, { sources, claims });
   }
 
   async review(productionId, input = {}) {
@@ -90,6 +136,8 @@ class ProvenanceService {
         accessedAt: this.date(item?.accessedAt) || new Date().toISOString(),
         sourceType: SOURCE_TYPES.has(item?.sourceType) ? item.sourceType : 'other',
         status: SOURCE_STATUSES.has(item?.status) ? item.status : 'pending',
+        origin: SOURCE_ORIGINS.has(item?.origin) ? item.origin : 'manual',
+        excerpt: this.text(item?.excerpt, 600),
         notes: this.text(item?.notes, 1000)
       };
     });

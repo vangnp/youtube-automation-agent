@@ -30,6 +30,7 @@
         <button class="nav-item" data-view="analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 20.5h17"/><path d="M6.5 20V11M11 20V4.5M15.5 20v-7M20 20V8.5"/></svg> Analytics</button>
         <button class="nav-item" data-view="engagement"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-9.1 8.4 9 9 0 01-3.8-.9L3 20l1-4.9A8.4 8.4 0 1121 11.5z"/><path d="M8 10h8M8 13.5h5"/></svg> Engagement</button>
         <button class="nav-item" data-view="readiness"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8l7.5 3v6c0 4.8-3.2 8.2-7.5 9.4-4.3-1.2-7.5-4.6-7.5-9.4v-6z"/><path d="M8.8 12.2l2.3 2.3 4.4-4.6"/></svg> Production readiness</button>
+        <button class="nav-item" data-view="quota"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 17a8.5 8.5 0 1117 0"/><path d="M12 17l4-5.5"/><circle cx="12" cy="17" r="1.4"/><path d="M6.5 11.5l1 .8M12 6.5v1.3M17.5 11.5l-1 .8"/></svg> API keys &amp; quota <b id="quota-badge" class="badge hidden">0</b></button>
         <button class="nav-item" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06A1.7 1.7 0 0015 19.4a1.7 1.7 0 00-1 1.55V21a2 2 0 11-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 110-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.33-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 114 0v.09a1.7 1.7 0 001 1.51 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9c.28.66.9 1.05 1.55 1H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.51 1z"/></svg> Channel setup</button>
       </nav>
       <div class="sidebar-footer">
@@ -105,6 +106,7 @@
               <label><span>Monthly production budget</span><span class="currency-input"><select name="outcomeCurrency" aria-label="Outcome currency"><option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="AUD">AUD</option></select><input name="monthlyBudget" type="number" min="0" step="0.01" placeholder="Optional"></span></label>
               <label class="full-row"><span>Outcome context</span><input name="successMetric" maxlength="300" placeholder="Grow qualified subscribers who return for practical automation tutorials"><small>Used by planning alongside the measurable primary outcome.</small></label>
               <label class="full-row"><span>Boundaries and constraints</span><textarea name="constraints" rows="3" maxlength="2000" placeholder="No hype, no unverified statistics, explain costs and tradeoffs."></textarea></label>
+              <label class="toggle full-row"><input name="scriptReview" type="checkbox" checked><span></span> Show me each script first. Make the video only after I approve it.</label>
             </div>
             <p class="callout">The operator uses YouTube trend signals, configured competitors, and channel history. Publishing still obeys your quality, factual-review, rights, and approval gates.</p>
             <div class="form-actions"><button type="submit" class="button secondary">Save strategy</button><button id="activate-operator-button" type="button" class="button primary">Activate & run now</button><button id="pause-operator-button" type="button" class="button danger hidden">Pause operator</button></div>
@@ -113,6 +115,10 @@
             <article class="panel">
               <div class="panel-heading"><div><p class="eyebrow">CURRENT RUN</p><h2 id="operator-run-title">Waiting for a strategy</h2></div><div class="run-actions"><button id="resume-operator-run" class="text-button approve hidden">Resume run</button><button id="cancel-operator-run" class="text-button hidden">Stop run</button></div></div>
               <div id="operator-run-summary"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">SCRIPT REVIEW</p><h2>Scripts waiting for you</h2></div></div>
+              <div id="operator-scripts" class="plan-list"></div>
             </article>
             <article class="panel">
               <div class="panel-heading"><div><p class="eyebrow">EDITORIAL PLAN</p><h2>What Lumen decided to make</h2></div></div>
@@ -256,6 +262,42 @@
         <p class="callout readiness-policy">A recorded blocking failure stops autonomous generation and publishing until a later run passes. An unverified or stale result remains visible but does not interrupt manual work.</p>
       </section>
 
+      <section id="quota-view" class="view">
+        <div class="section-intro">
+          <div><h2>API keys &amp; quota</h2><p>Every Gemini key, what it spent today, the limits per model, and when they reset. Refreshes on its own while this page is open.</p></div>
+          <div class="quota-actions"><span id="quota-updated" class="meta-line"></span><button id="quota-check-button" class="button secondary small">Re-check keys</button></div>
+        </div>
+        <div class="stats-grid quota-stats">
+          <article class="stat"><span>Keys ready</span><strong id="quota-keys-ready">—</strong><small id="quota-keys-note">checking with Google…</small></article>
+          <article class="stat"><span>Requests today</span><strong id="quota-requests">—</strong><small id="quota-requests-note">since the last reset</small></article>
+          <article class="stat"><span>Tokens today</span><strong id="quota-tokens">—</strong><small>input + output, all keys</small></article>
+          <article class="stat"><span>Daily reset in</span><strong id="quota-reset" data-countdown="">—</strong><small id="quota-reset-note">midnight Pacific time</small></article>
+        </div>
+        <div id="quota-alerts"></div>
+        <div id="quota-keys" class="quota-key-grid"></div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PER MODEL × PER KEY</p><h2>Usage against limits</h2></div>
+            <div class="quota-legend" aria-hidden="true"><span><i class="ok"></i>under 70%</span><span><i class="warn"></i>70–90%</span><span><i class="hot"></i>90%+ or limited</span></div>
+          </div>
+          <div id="quota-matrix" class="quota-matrix"></div>
+          <p class="callout">Google does not tell an API key how much quota is left, so requests are counted here as the pipeline makes them. A limit marked <b>Google</b> was reported in a 429 response; set the others yourself from the rate-limits page of your Google AI Studio project. Request-per-day limits reset at midnight Pacific time; per-minute limits free up within a minute.</p>
+        </article>
+        <div class="overview-grid lower">
+          <article class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">LAST 24 HOURS</p><h2>Requests per hour</h2></div><div class="quota-legend" aria-hidden="true"><span><i class="req"></i>accepted</span><span><i class="hot"></i>rate-limited</span></div></div>
+            <div id="quota-hourly" class="quota-hourly"></div>
+            <div class="panel-heading quota-subheading"><div><p class="eyebrow">LATEST CALLS</p></div></div>
+            <div id="quota-recent" class="quota-recent"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">OTHER PROVIDERS</p><h2>Other stored keys</h2></div></div>
+            <div id="quota-other" class="quota-other"></div>
+            <p class="callout">Only Gemini calls are metered on this page. Other providers are listed so you can see at a glance which keys are stored.</p>
+          </article>
+        </div>
+      </section>
+
       <section id="settings-view" class="view">
         <div class="section-intro"><div><h2>Channel setup</h2><p>These guardrails guide every agent in the pipeline.</p></div></div>
         <form id="profile-form" class="panel settings-form">
@@ -322,9 +364,14 @@
         <label><span>Format</span><select name="style"><option value="explainer">Explainer</option><option value="tutorial">Tutorial</option><option value="list">List</option><option value="review">Review</option><option value="story">Story</option></select></label>
         <label><span>Length</span><select name="length"><option value="short">Short · 2–4 min</option><option value="medium" selected>Medium · 8–12 min</option><option value="long">Long · 15–20 min</option></select></label>
       </div>
+      <label class="toggle"><input name="scriptApproval" type="checkbox" checked><span></span> Show me the script first. Make the video only after I approve it.</label>
       <p class="callout">Generation runs in the background. You can follow each stage and cancel between stages.</p>
       <div class="form-actions"><button type="submit" class="button primary">Start generation</button><button type="button" class="button ghost" data-close>Cancel</button></div>
     </form>
+  </dialog>
+
+  <dialog id="script-dialog" class="dialog content-dialog">
+    <div id="script-detail"></div>
   </dialog>
 
   <dialog id="content-dialog" class="dialog content-dialog">
@@ -343,6 +390,7 @@
   </dialog>
 
   <script src="/app.js" defer></script>
+  <script src="/quota.js" defer></script>
   <script src="/enhance.js" defer></script>
 </body>
 </html>

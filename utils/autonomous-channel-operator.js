@@ -122,6 +122,12 @@ class AutonomousChannelOperator {
           await this.update(runId, { generatedJobs });
           await this.assertNotCancelled(runId);
           let job = record.jobId ? await this.db.getGenerationJob(record.jobId) : null;
+          if (job && job.status === 'awaiting_script_approval') {
+            record.status = job.status;
+            record.productionId = null;
+            if (ideaId) await this.db.updateContentIdea(ideaId, { status: 'script_review' });
+            continue;
+          }
           if (job && ['failed', 'interrupted'].includes(job.status)) {
             job = await this.resumeGenerationJob(job.id);
           } else if (!job || !['queued', 'running', 'completed'].includes(job.status)) {
@@ -139,7 +145,8 @@ class AutonomousChannelOperator {
                 objective: strategy.objective,
                 valueProposition: strategy.value_proposition,
                 constraints: strategy.constraints,
-                researchSources: (research.sourceCatalog || []).filter(source => selectedSourceUrls.has(source.url))
+                researchSources: (research.sourceCatalog || []).filter(source => selectedSourceUrls.has(source.url)),
+                scriptApproval: Number(strategy.script_review ?? 1) !== 0
               }
             });
           }
@@ -152,7 +159,8 @@ class AutonomousChannelOperator {
           record.reviewStatus = completed.details?.reviewStatus || null;
           record.error = completed.error || null;
           if (ideaId) await this.db.updateContentIdea(ideaId, {
-            status: completed.status === 'completed' ? 'generated' : 'failed'
+            status: completed.status === 'completed' ? 'generated'
+              : completed.status === 'awaiting_script_approval' ? 'script_review' : 'failed'
           });
         } catch (error) {
           record.status = error.code === 'OPERATOR_CANCELLED' ? 'cancelled' : 'failed';
@@ -168,18 +176,24 @@ class AutonomousChannelOperator {
 
       const completed = generatedJobs.filter(job => job.status === 'completed');
       const needsReview = completed.filter(job => ['needs_review', 'needs_attention'].includes(job.reviewStatus));
-      const failed = generatedJobs.filter(job => job.status !== 'completed');
-      const allFailed = completed.length === 0 && failed.length > 0;
-      const status = allFailed ? 'failed' : needsReview.length ? 'waiting_review' : failed.length ? 'completed_with_issues' : 'completed';
+      const awaitingScript = generatedJobs.filter(job => job.status === 'awaiting_script_approval');
+      const failed = generatedJobs.filter(job => job.status !== 'completed' && job.status !== 'awaiting_script_approval');
+      const allFailed = completed.length === 0 && awaitingScript.length === 0 && failed.length > 0;
+      const status = allFailed ? 'failed'
+        : needsReview.length || awaitingScript.length ? 'waiting_review'
+          : failed.length ? 'completed_with_issues' : 'completed';
       const summary = {
         planned: plan.length,
         generated: completed.length,
         needsReview: needsReview.length,
+        awaitingScript: awaitingScript.length,
         failed: failed.length
       };
       await this.update(runId, {
         status,
-        stage: allFailed ? 'failed' : needsReview.length ? 'waiting_for_review' : 'complete',
+        stage: allFailed ? 'failed'
+          : awaitingScript.length ? 'waiting_for_script_review'
+            : needsReview.length ? 'waiting_for_review' : 'complete',
         progress: 100,
         generatedJobs,
         summary,
@@ -189,8 +203,11 @@ class AutonomousChannelOperator {
       await this.notify({
         type: 'autonomous_run_complete',
         level: failed.length ? 'warning' : 'success',
-        title: needsReview.length ? 'Autonomous plan is ready for review' : 'Autonomous plan completed',
-        message: `${completed.length} of ${plan.length} planned videos finished production.`,
+        title: awaitingScript.length ? 'Scripts are ready for your review'
+          : needsReview.length ? 'Autonomous plan is ready for review' : 'Autonomous plan completed',
+        message: awaitingScript.length
+          ? `${awaitingScript.length} script${awaitingScript.length === 1 ? '' : 's'} wait for approval before the video is made.`
+          : `${completed.length} of ${plan.length} planned videos finished production.`,
         data: { runId, ...summary }
       });
     } catch (error) {

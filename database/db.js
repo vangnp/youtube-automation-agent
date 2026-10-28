@@ -642,7 +642,8 @@ class Database {
       target_value: 'REAL',
       target_window_days: 'INTEGER DEFAULT 28',
       monthly_budget: 'REAL',
-      outcome_currency: "TEXT DEFAULT 'USD'"
+      outcome_currency: "TEXT DEFAULT 'USD'",
+      script_review: 'INTEGER DEFAULT 1'
     });
     await this.ensureColumns('discoverability_audits', {
       error_code: 'TEXT'
@@ -1635,8 +1636,8 @@ class Database {
         id, objective, audience, value_proposition, content_pillars, cadence_per_week,
         videos_per_run, default_format, default_length, success_metric, primary_kpi,
         target_value, target_window_days, monthly_budget, outcome_currency, constraints,
-        status, created_at, updated_at
-      ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), datetime('now'))
+        script_review, status, created_at, updated_at
+      ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         objective = excluded.objective, audience = excluded.audience,
         value_proposition = excluded.value_proposition, content_pillars = excluded.content_pillars,
@@ -1645,7 +1646,7 @@ class Database {
         success_metric = excluded.success_metric, primary_kpi = excluded.primary_kpi,
         target_value = excluded.target_value, target_window_days = excluded.target_window_days,
         monthly_budget = excluded.monthly_budget, outcome_currency = excluded.outcome_currency,
-        constraints = excluded.constraints,
+        constraints = excluded.constraints, script_review = excluded.script_review,
         status = excluded.status, updated_at = datetime('now')`,
       [
         strategy.objective ?? current.objective ?? '',
@@ -1663,6 +1664,7 @@ class Database {
         strategy.monthlyBudget ?? current.monthly_budget ?? null,
         strategy.outcomeCurrency ?? current.outcome_currency ?? 'USD',
         strategy.constraints ?? current.constraints ?? '',
+        Number(Boolean(strategy.scriptReview ?? strategy.script_review ?? current.script_review ?? 1)),
         strategy.status ?? current.status ?? 'draft',
         current.created_at || null
       ]
